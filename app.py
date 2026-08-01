@@ -9,10 +9,10 @@ from geopy.geocoders import Nominatim
 # PAGE SETUP & STYLING
 # ==========================================
 st.set_page_config(
-    page_title="Cryptid GIS Field Engine",
+    page_title="Cryptid GIS Field Platform",
     page_icon="🌲",
     layout="wide",
-    initial_sidebar_state="collapsed" # Starts collapsed for maximum map space
+    initial_sidebar_state="collapsed"
 )
 
 st.title("🌲 Cryptid GIS Field Platform")
@@ -80,8 +80,8 @@ with tab_map:
     # Initialize Folium Map centered on searched location
     m = folium.Map(
         location=[st.session_state.center_lat, st.session_state.center_lon],
-        zoom_start=11, # Clear detail zoom level for town names & routes
-        tiles=None # Custom tile handling below
+        zoom_start=11,
+        tiles=None
     )
 
     # High-Detail Map Tile Options (Clear Routes & Towns)
@@ -212,10 +212,12 @@ with tab_parser:
         c1, c2 = st.columns(2)
         with c1:
             st.success("🟢 Concrete Observations")
-            for c in concrete: st.markdown(f"- {c}")
+            for c in concrete: 
+                st.markdown(f"- {c}")
         with c2:
             st.warning("🟡 Witness Conjecture")
-            for c in *conjecture: st.markdown(f"- {c}")
+            for c in conjecture: 
+                st.markdown(f"- {c}")
 
 # ------------------------------------------
 # TAB 5: ONX / GPX EXPORTER
