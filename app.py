@@ -51,8 +51,9 @@ def get_macaulay_url(query):
     encoded = urllib.parse.quote(query)
     return f"https://search.macaulaylibrary.org/catalog?q={encoded}&mediaType=audio"
 
-def get_loc_archive_url(query):
-    encoded = urllib.parse.quote(query)
+def get_loc_archive_url(query, state=""):
+    full_query = f"{query} {state}".strip()
+    encoded = urllib.parse.quote(full_query)
     return f"https://chroniclingamerica.loc.gov/search/pages/results/?searchType=basic&terms={encoded}"
 
 # ==========================================
@@ -89,45 +90,51 @@ st.markdown("---")
 WILDLIFE_DATABASE = [
     {
         "Species": "White-tailed Deer",
-        "Acoustic/Visual Profile": "Chimp-like snort-wheezes, aggressive blows & heavy stomping",
+        "Acoustic/Visual Profile": "Chimp-like snort-wheezes, aggressive blows & heavy nocturnal stomping in brush",
         "Regions Present": ["NC", "OH", "ME", "VA", "PA", "WV", "TN", "GA", "FL", "NY", "TX", "ALL_EAST"],
         "Macaulay Link": get_macaulay_url("White-tailed Deer snort wheeze")
     },
     {
         "Species": "Barred Owl",
-        "Acoustic/Visual Profile": "Monkey-like 'Who cooks for you' duets & maniacal laughter",
+        "Acoustic/Visual Profile": "Monkey-like 'Who cooks for you' duets & maniacal nocturnal laughter/screams",
         "Regions Present": ["NC", "OH", "ME", "VA", "PA", "WV", "TN", "GA", "FL", "NY", "ALL_EAST"],
         "Macaulay Link": get_macaulay_url("Barred Owl duet call")
     },
     {
         "Species": "Fisher (Pekan)",
-        "Acoustic/Visual Profile": "Blood-curdling screech / scream in dark timber",
+        "Acoustic/Visual Profile": "Blood-curdling screech / scream in dark timber, often confused for human distress",
         "Regions Present": ["ME", "NY", "PA", "WV", "NH", "VT", "MA", "NORTH"],
         "Macaulay Link": get_macaulay_url("Pekania pennanti scream")
     },
     {
         "Species": "Red Fox (Vixen)",
-        "Acoustic/Visual Profile": "High-pitched human-like distress scream",
+        "Acoustic/Visual Profile": "High-pitched human-like distress scream echoing across ravines",
         "Regions Present": ["ALL"],
         "Macaulay Link": get_macaulay_url("Vulpes vulpes vixen scream")
     },
     {
         "Species": "Bobcat",
-        "Acoustic/Visual Profile": "Eerie screaming, growls, and raspy squalls during mating",
+        "Acoustic/Visual Profile": "Eerie screaming, guttural growls, and raspy squalls during mating season",
         "Regions Present": ["ALL"],
         "Macaulay Link": get_macaulay_url("Lynx rufus vocalization")
     },
     {
         "Species": "Coyote (Pack)",
-        "Acoustic/Visual Profile": "Group yip-howls creates acoustic illusion of multiple vocalists",
+        "Acoustic/Visual Profile": "Group yip-howls creating acoustic Doppler illusion of multiple unseen vocalists",
         "Regions Present": ["ALL"],
         "Macaulay Link": get_macaulay_url("Canis latrans howl")
     },
     {
         "Species": "Black Bear",
-        "Acoustic/Visual Profile": "Bipedal posture when foraging; heavy huffs, jaw pops, and stomps",
+        "Acoustic/Visual Profile": "Bipedal posture when foraging; heavy huffs, jaw pops, aggressive tree shaking, and stomps",
         "Regions Present": ["NC", "ME", "VA", "WV", "TN", "PA", "NY", "OR", "WA", "CA"],
         "Macaulay Link": get_macaulay_url("Ursus americanus huff")
+    },
+    {
+        "Species": "Elk (Wapiti)",
+        "Acoustic/Visual Profile": "Eerie high-pitched bugle echoing across high elevation mountain valleys",
+        "Regions Present": ["NC", "PA", "TN", "OR", "WA", "MT", "WY", "CO"],
+        "Macaulay Link": get_macaulay_url("Cervus canadensis bugle")
     }
 ]
 
@@ -169,7 +176,7 @@ with tab_map:
 
     m = folium.Map(
         location=[st.session_state.center_lat, st.session_state.center_lon],
-        zoom_start=11,
+        zoom_start=10,
         tiles="OpenStreetMap"
     )
 
@@ -183,7 +190,7 @@ with tab_map:
     # Wildlife Pins
     if show_wildlife:
         for idx, species in enumerate(active_wildlife[:3]):
-            offset_lat = st.session_state.center_lat + (0.01 * (idx + 1))
+            offset_lat = st.session_state.center_lat + (0.015 * (idx + 1))
             offset_lon = st.session_state.center_lon - (0.02 * (idx + 1))
             wildlife_html = f"""
             <b>🐾 Candidate Species: {species['Species']}</b><br>
@@ -199,33 +206,20 @@ with tab_map:
     # Lore Pins
     if show_lore:
         lore_html = """
-        <b>🪶 Primary Record: Tsul 'Kalu (Judaculla)</b><br>
-        <p>Cherokee oral history records the <i>Tsul 'Kalu</i>—a mountain giant controlling wild game in high bald peaks.</p>
-        <a href="https://www.ncpedia.org/judaculla-rock" target="_blank">📄 Read NC Historical Archive Record</a>
+        <b>🪶 Primary Record: Ethno-Historical Lore Node</b><br>
+        <p>Cherokee & regional settler oral histories record large wild beings controlling game across high bald peaks and timberlines.</p>
+        <a href="https://www.ncpedia.org/judaculla-rock" target="_blank">📄 Read Historical Archive Record</a>
         """
         folium.Marker(
-            [st.session_state.center_lat + 0.02, st.session_state.center_lon + 0.02],
+            [st.session_state.center_lat + 0.025, st.session_state.center_lon + 0.025],
             popup=folium.Popup(lore_html, max_width=280),
             icon=folium.Icon(color="orange", icon="feather", prefix="fa")
         ).add_to(m)
 
-    # FETCH SIGHTING REPORTS FROM SUPABASE (DYNAMIC SPATIAL BOUNDS)
+    # FETCH ALL SIGHTING REPORTS FROM SUPABASE
     if show_bfro and supabase:
         try:
-            # Query window: +/- 1.0 degree lat/lon bounding box (~60 mile radius)
-            lat_min, lat_max = st.session_state.center_lat - 1.0, st.session_state.center_lat + 1.0
-            lon_min, lon_max = st.session_state.center_lon - 1.0, st.session_state.center_lon + 1.0
-
-            response = (
-                supabase.table("sighting_reports")
-                .select("*")
-                .gte("latitude", lat_min)
-                .lte("latitude", lat_max)
-                .gte("longitude", lon_min)
-                .lte("longitude", lon_max)
-                .execute()
-            )
-            
+            response = supabase.table("sighting_reports").select("*").execute()
             sightings = response.data
             for report in sightings:
                 s_html = f"""
@@ -264,7 +258,7 @@ with tab_map:
 # ------------------------------------------
 with tab_wildlife:
     st.subheader(f"🔊 Null-Hypothesis Analysis: Local Candidate Fauna for `{st.session_state.location_name}`")
-    st.write("Before attributing an auditory or visual anomaly to an unclassified hominid, rule out these confirmed local species:")
+    st.write("Applying strict scientific controls: before attributing an acoustic or visual anomaly to an unclassified hominid, rule out these confirmed regional species:")
 
     df_local_wildlife = pd.DataFrame(active_wildlife)
     st.data_editor(
@@ -281,20 +275,28 @@ with tab_wildlife:
 # ------------------------------------------
 with tab_archives:
     st.subheader(f"📰 Digitized Primary Sources & Historical Archives for `{st.session_state.location_name}`")
-    st.write("Direct queries sent to the Library of Congress (Chronicling America) and state historical societies.")
+    st.write("Direct queries sent to the Library of Congress (Chronicling America) and state historical archives for 19th and early 20th century records.")
 
+    loc_name = st.session_state.location_name
+    
     local_news_records = [
         {
-            "Date": "1888-04-12",
-            "Headline": "'Hairy Giant' Reported Near Local Ridge",
-            "Classification": "Settler News Archive",
-            "Primary Source Link": get_loc_archive_url("Hairy Giant")
+            "Topic / Historical Term": "19th Century 'Hairy Giant' & 'Wild Man' Reports",
+            "Archive Source": "Library of Congress (Chronicling America)",
+            "Search Query Focus": f"Hairy Giant / Wild Man in {loc_name}",
+            "Primary Source Link": get_loc_archive_url("Hairy Giant", loc_name)
         },
         {
-            "Date": "1923-11-14",
-            "Headline": "Unexplained Wood Knocks & Vocalizations Recorded in Mountain Range",
-            "Classification": "Regional Historical Record",
-            "Primary Source Link": get_loc_archive_url("Wild Man Mountain")
+            "Topic / Historical Term": "Unexplained Wilderness Vocalizations & Wood Knocks",
+            "Archive Source": "Library of Congress (Chronicling America)",
+            "Search Query Focus": f"Strange screams / sounds in timberland near {loc_name}",
+            "Primary Source Link": get_loc_archive_url("Wild Man Mountain", loc_name)
+        },
+        {
+            "Topic / Historical Term": "Native Indigenous Oral History & Ethno-Lore",
+            "Archive Source": "Regional Native Historical Archives & NCpedia",
+            "Search Query Focus": "Indigenous accounts of mountain giants & wilderness guardians",
+            "Primary Source Link": "https://www.ncpedia.org/judaculla-rock"
         }
     ]
 
@@ -302,7 +304,7 @@ with tab_archives:
     st.data_editor(
         df_news,
         column_config={
-            "Primary Source Link": st.column_config.LinkColumn("Library of Congress Archive Query", display_text="📄 Search Library of Congress Scans")
+            "Primary Source Link": st.column_config.LinkColumn("Historical Archive Query", display_text="📄 Search Library of Congress Scans")
         },
         disabled=True,
         use_container_width=True
