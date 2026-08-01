@@ -161,7 +161,7 @@ tab_map, tab_wildlife, tab_archives, tab_field, tab_parser, tab_export = st.tabs
 with tab_map:
     with st.expander("🗂️ Analysis Layers (Critical Variable Toggles)", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
-        show_bfro = c1.checkbox("Documented Sighting Nodes", value=True)
+        show_bfro = c1.checkbox("Documented Sighting Nodes (Supabase)", value=True)
         show_lore = c2.checkbox("🪶 Primary Ethno-Historical Lore", value=True)
         show_camping = c3.checkbox("⛺ Public Land Access", value=True)
         show_infrasound = c4.checkbox("🔊 Acoustic / Infrasound Hazards", value=True)
@@ -173,7 +173,7 @@ with tab_map:
         tiles="OpenStreetMap"
     )
 
-    # Analysis Center
+    # Analysis Center Marker
     folium.Marker(
         [st.session_state.center_lat, st.session_state.center_lon],
         popup=f"<b>Analysis Center</b><br>{st.session_state.location_name}<br>Lat: {st.session_state.center_lat:.4f}, Lon: {st.session_state.center_lon:.4f}",
@@ -209,20 +209,39 @@ with tab_map:
             icon=folium.Icon(color="orange", icon="feather", prefix="fa")
         ).add_to(m)
 
-    # Sighting Pins
-    if show_bfro:
-        sighting_html = """
-        <b>👣 Documented BFRO Incident</b><br>
-        <p>Class A visual and auditory report logged during field investigation.</p>
-        <a href="https://www.bfro.net/GDB/state_listing.asp?state=nc" target="_blank">📄 Open BFRO Regional Database Index</a>
-        """
-        folium.Marker(
-            [st.session_state.center_lat - 0.015, st.session_state.center_lon - 0.015],
-            popup=folium.Popup(sighting_html, max_width=280),
-            icon=folium.Icon(color="blue", icon="tree", prefix="fa")
-        ).add_to(m)
+    # FETCH SIGHTING REPORTS FROM SUPABASE (DYNAMIC SPATIAL BOUNDS)
+    if show_bfro and supabase:
+        try:
+            # Query window: +/- 1.0 degree lat/lon bounding box (~60 mile radius)
+            lat_min, lat_max = st.session_state.center_lat - 1.0, st.session_state.center_lat + 1.0
+            lon_min, lon_max = st.session_state.center_lon - 1.0, st.session_state.center_lon + 1.0
 
-    # Fetch and Render Saved User Logs from Supabase!
+            response = (
+                supabase.table("sighting_reports")
+                .select("*")
+                .gte("latitude", lat_min)
+                .lte("latitude", lat_max)
+                .gte("longitude", lon_min)
+                .lte("longitude", lon_max)
+                .execute()
+            )
+            
+            sightings = response.data
+            for report in sightings:
+                s_html = f"""
+                <b>👣 [{report.get('source', 'Sighting')}] {report.get('title', 'Historical Report')}</b><br>
+                <i>Date: {report.get('event_date', 'N/A')} | Rating: {report.get('class_rating', 'Class A/B')}</i><br>
+                <p>{report.get('summary', 'No summary details.')}</p>
+                """
+                folium.Marker(
+                    [report["latitude"], report["longitude"]],
+                    popup=folium.Popup(s_html, max_width=280),
+                    icon=folium.Icon(color="blue", icon="tree", prefix="fa")
+                ).add_to(m)
+        except Exception as e:
+            st.warning(f"Sighting query error: {e}")
+
+    # FETCH USER FIELD LOGS FROM SUPABASE
     if supabase:
         try:
             response = supabase.table("user_field_logs").select("*").execute()
