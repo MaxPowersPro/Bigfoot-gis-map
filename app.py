@@ -1,262 +1,227 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from shapely.geometry import Point
-import pyproj
-from functools import partial
-from shapely.ops import transform
-import urllib.parse
-import json
+import pandas as pd
+from datetime import datetime
+from geopy.geocoders import Nominatim
 
 # ==========================================
-# PAGE CONFIGURATION (CEO UI SETUP)
+# PAGE SETUP & STYLING
 # ==========================================
 st.set_page_config(
-    page_title="Cryptid GIS & Spatial Research Engine",
+    page_title="Cryptid GIS Field Engine",
     page_icon="🌲",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed" # Starts collapsed for maximum map space
 )
 
-st.title("🌲 Cryptid GIS & Spatial Research Engine")
-st.caption("Phase 1 Prototype | Objective Spatial Analysis, Infrasound Auditing & Toponym Scanning")
+st.title("🌲 Cryptid GIS Field Platform")
+
+# Initialize Session State
+if "center_lat" not in st.session_state:
+    st.session_state.center_lat = 35.944444
+if "center_lon" not in st.session_state:
+    st.session_state.center_lon = -82.772333
+if "community_notes" not in st.session_state:
+    st.session_state.community_notes = []
+
+# Initialize Search Engine
+geolocator = Nominatim(user_agent="cryptid_gis_app")
 
 # ==========================================
-# HELPER FUNCTIONS
+# HIGH-SPEED LOCATION SEARCH BAR
 # ==========================================
+st.markdown("### 🔍 Find Any Location, Route, or Town")
+col_search, col_btn = st.columns([4, 1])
 
-def create_geodesic_buffer(lat, lon, miles):
-    """
-    Creates a mathematically accurate geodesic circle (buffer) in miles 
-    around a specific latitude and longitude point.
-    """
-    meters = miles * 1609.34
-    proj_wgs84 = pyproj.CRS('EPSG:4326')
-    
-    # Azimuthal Equidistant Projection centered on target coordinate
-    proj_aeqd = pyproj.CRS(f"+proj=aeqd +lat_0={lat} +lon_0={lon} +x_0=0 +y_0=0 +datum=WGS84 +units=m")
-    
-    project_to_aeqd = pyproj.Transformer.from_crs(proj_wgs84, proj_aeqd, always_xy=True).transform
-    project_to_wgs84 = pyproj.Transformer.from_crs(proj_aeqd, proj_wgs84, always_xy=True).transform
-    
-    point = Point(lon, lat)
-    point_aeqd = transform(project_to_aeqd, point)
-    buffer_aeqd = point_aeqd.buffer(meters)
-    buffer_wgs84 = transform(project_to_wgs84, buffer_aeqd)
-    
-    coords = list(buffer_wgs84.exterior.coords)
-    return [(y, x) for x, y in coords]
+with col_search:
+    search_query = st.text_input("Search Place, Town, Highway, or Park", placeholder="e.g. Hot Springs NC, Route 25, or Unaka Mountain")
 
-def parse_witness_report(raw_text):
-    """
-    Categorizes raw witness statements into Concrete Observations vs. Witness Conjecture.
-    """
-    if not raw_text.strip():
-        return None, None
-        
-    lines = raw_text.split('\n')
-    concrete = []
-    conjecture = []
-    
-    # Rule-based classification keywords
-    conjecture_keywords = ["felt", "thought", "believed", "seemed", "appeared", "telepathic", "mindspeak", "intent", "afraid", "scared", "angry", "protecting"]
-    
-    for line in lines:
-        line_str = line.strip()
-        if not line_str:
-            continue
-        if any(word in line_str.lower() for word in conjecture_keywords):
-            conjecture.append(line_str)
-        else:
-            concrete.append(line_str)
-            
-    return concrete, conjecture
+with col_btn:
+    st.write("") # Alignment spacer
+    if st.button("🔎 Search Map"):
+        if search_query:
+            try:
+                location = geolocator.geocode(search_query)
+                if location:
+                    st.session_state.center_lat = location.latitude
+                    st.session_state.center_lon = location.longitude
+                    st.success(f"Found: {location.address}")
+                else:
+                    st.error("Location not found. Try adding a state or county name.")
+            except Exception as e:
+                st.error("Search service busy. Try again in a moment.")
 
-# ==========================================
-# SIDEBAR CONTROLS
-# ==========================================
-st.sidebar.header("📍 Target Coordinates")
-lat_input = st.sidebar.number_input("Latitude", value=35.944444, format="%.6f")
-lon_input = st.sidebar.number_input("Longitude", value=-82.772333, format="%.6f")
-
-st.sidebar.markdown("---")
-st.sidebar.header("🔍 Dynamic Map Scope")
-
-# Google Maps Style Zoom Slider
-zoom_level = st.sidebar.slider(
-    "Zoom Scope",
-    min_value=6,
-    max_value=14,
-    value=10,
-    step=1,
-    help="Zoom 13 (~10mi Micro-Terrain) | Zoom 11 (~25mi Local) | Zoom 9 (~50mi Regional) | Zoom 7 (~100mi Corridor)"
-)
-
-show_active_ring = st.sidebar.checkbox("Draw Active Scope Ring on Map", value=True)
-
-st.sidebar.markdown("---")
-st.sidebar.header("🎯 Feature Layers")
-show_bfro = st.sidebar.checkbox("Show BFRO Sample Nodes", value=True)
-show_bfm = st.sidebar.checkbox("Show Bigfoot Mapping Project Nodes", value=True)
-show_infrasound = st.sidebar.checkbox("Show Infrasound / Industrial Producers", value=True)
+st.markdown("---")
 
 # ==========================================
 # MAIN INTERFACE TABS
 # ==========================================
-tab_map, tab_toponyms, tab_parser, tab_export = st.tabs([
-    "🗺️ Interactive GIS Map", 
-    "🏷️ USGS Ominous Toponyms", 
-    "📄 Witness Report Filter", 
+tab_map, tab_field, tab_archives, tab_parser, tab_export = st.tabs([
+    "🗺️ Interactive High-Detail Map",
+    "📌 Submit Field Report & Media",
+    "📰 Newspaper Archives & Toponyms",
+    "📄 Witness Report Data Filter",
     "📱 onX / GPX Exporter"
 ])
 
 # ------------------------------------------
-# TAB 1: INTERACTIVE MAP (TOUCH & PINCH ENABLED)
+# TAB 1: INTERACTIVE HIGH-DETAIL MAP
 # ------------------------------------------
 with tab_map:
-    st.subheader("Spatial Overlay & Dynamic Viewport")
-    st.caption("Pinch with two fingers on mobile to zoom, or drag with one finger to pan.")
-    
-    # Initialize Folium Map with Native Mobile Touch Optimizations
+    # Sidebar Layer Toggles
+    with st.expander("🗂️ Map Layer Controls (Click to expand/collapse)", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        show_bfro = c1.checkbox("BFRO Sightings", value=True)
+        show_bfm = c2.checkbox("Bigfoot Mapping Project", value=True)
+        show_lore = c3.checkbox("🪶 Native American Lore", value=True)
+        show_toponyms = c4.checkbox("USGS Ominous Toponyms", value=True)
+
+    # Initialize Folium Map centered on searched location
     m = folium.Map(
-        location=[lat_input, lon_input], 
-        zoom_start=zoom_level,
-        tiles="OpenStreetMap",
-        control_scale=True,       # Google-style distance scale (miles/km)
-        zoom_control=True,        # On-screen +/- buttons
-        scroll_wheel_zoom=True,   # Desktop mouse wheel zoom
-        touch_zoom=True,          # Native mobile pinch-to-zoom
-        dragging=True             # One-finger touch panning
+        location=[st.session_state.center_lat, st.session_state.center_lon],
+        zoom_start=11, # Clear detail zoom level for town names & routes
+        tiles=None # Custom tile handling below
     )
-    
-    # Center Pin
+
+    # High-Detail Map Tile Options (Clear Routes & Towns)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Detailed Street & Route Map (Best for Road Numbers)",
+        overlay=False,
+        control=True
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+        attr="OpenTopoMap",
+        name="Topographic & Terrain Map",
+        overlay=False,
+        control=True
+    ).add_to(m)
+
+    # Layer Control Button on Top-Right of Map
+    folium.LayerControl(position="topright").add_to(m)
+
+    # Target Crosshair Pin
     folium.Marker(
-        [lat_input, lon_input],
-        popup=f"Target: {lat_input:.4f}, {lon_input:.4f}",
+        [st.session_state.center_lat, st.session_state.center_lon],
+        popup=f"Target Search Center: {st.session_state.center_lat:.4f}, {st.session_state.center_lon:.4f}",
         icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")
     ).add_to(m)
-    
-    # Active Radius Ring based on Zoom Level
-    if show_active_ring:
-        zoom_to_miles = {6: 150, 7: 100, 8: 75, 9: 50, 10: 35, 11: 25, 12: 15, 13: 10, 14: 5}
-        active_miles = zoom_to_miles.get(zoom_level, 25)
-        
-        poly_coords = create_geodesic_buffer(lat_input, lon_input, active_miles)
-        folium.Polygon(
-            locations=poly_coords,
-            color="#3388ff",
-            weight=2,
-            fill=True,
-            fill_opacity=0.06,
-            popup=f"Active Scope: ~{active_miles} Miles"
-        ).add_to(m)
 
-    # Biological Sightings Layer (BFRO)
-    if show_bfro:
-        bfro_group = folium.FeatureGroup(name="BFRO Reports (Biological Focus)").add_to(m)
+    # NATIVE AMERICAN LORE PINS (Directly on Map)
+    if show_lore:
+        lore_group = folium.FeatureGroup(name="Native American Lore").add_to(m)
         folium.Marker(
-            [lat_input + 0.04, lon_input - 0.03],
-            popup="<b>BFRO Class A</b><br>Wood knocks, rock throwing along creek bed.",
+            [35.9500, -82.8000],
+            popup="<b>🪶 Cherokee Tradition: Tsul 'Kalu (Judaculla)</b><br>Slant-eyed mountain giant associated with high bald peaks and petroglyphs.",
+            icon=folium.Icon(color="orange", icon="feather", prefix="fa")
+        ).add_to(lore_group)
+        folium.Marker(
+            [35.8800, -82.7500],
+            popup="<b>🪶 Cherokee Tradition: Nunne'hi</b><br>Invisible spirit race dwelling in subterranean caverns along river valleys.",
+            icon=folium.Icon(color="orange", icon="feather", prefix="fa")
+        ).add_to(lore_group)
+
+    # BFRO Sightings
+    if show_bfro:
+        bfro_group = folium.FeatureGroup(name="BFRO Sightings").add_to(m)
+        folium.Marker(
+            [35.9844, -82.8023],
+            popup="<b>BFRO Class A</b><br>Wood knocks & rock throwing along creek.",
             icon=folium.Icon(color="blue", icon="tree", prefix="fa")
         ).add_to(bfro_group)
 
-    # Bigfoot Mapping Project Layer
+    # Bigfoot Mapping Project
     if show_bfm:
         bfm_group = folium.FeatureGroup(name="Bigfoot Mapping Project").add_to(m)
         folium.Marker(
-            [lat_input - 0.02, lon_input + 0.05],
-            popup="<b>BFM Sighting Node</b><br>Visual encounter near ridge trail.",
+            [35.9244, -82.7223],
+            popup="<b>BFM Sightings Node</b><br>Visual encounter near ridge trail.",
             icon=folium.Icon(color="green", icon="eye", prefix="fa")
         ).add_to(bfm_group)
 
-    # Infrasound Layer
-    if show_infrasound:
-        infra_group = folium.FeatureGroup(name="Infrasound Producers").add_to(m)
+    # USGS Toponyms
+    if show_toponyms:
+        toponym_group = folium.FeatureGroup(name="USGS Toponyms").add_to(m)
         folium.Marker(
-            [lat_input + 0.08, lon_input + 0.02],
-            popup="<b>Infrasound Producer: Hydroelectric Dam</b><br>Continuous low-frequency vibration (0.5 - 12 Hz).",
-            icon=folium.Icon(color="purple", icon="industry", prefix="fa")
-        ).add_to(infra_group)
+            [35.9100, -82.8300],
+            popup="<b>USGS Feature: Wildman Branch</b><br>Historic 19th century creature reference.",
+            icon=folium.Icon(color="purple", icon="map-pin", prefix="fa")
+        ).add_to(toponym_group)
+
+    # User Field Notes
+    for note in st.session_state.community_notes:
+        if note.get("privacy") == "Public":
+            folium.Marker(
+                [note["lat"], note["lon"]],
+                popup=f"<b>{note['title']}</b><br>{note['notes']}",
+                icon=folium.Icon(color="darkgreen", icon="flag", prefix="fa")
+            ).add_to(m)
 
     # Render Map
-    st_folium(m, width=1100, height=600)
+    st_folium(m, width=1100, height=650)
 
 # ------------------------------------------
-# TAB 2: USGS TOPONYM SCANNER
+# TAB 2: FIELD REPORT SUBMISSION
 # ------------------------------------------
-with tab_toponyms:
-    st.subheader("USGS GNIS Ominous & Folklore Feature Scanner")
-    st.write("Identifies local physical features with ominous or historical folklore names within radius.")
-    
-    ominous_keywords = ["Devil", "Dead", "Ghost", "Hell", "Coffin", "Skeleton", "Blood", "Dark", "Spook", "Witch"]
-    st.markdown("**Active Keyword Filter:** " + ", ".join([f"`{k}`" for k in ominous_keywords]))
-    
-    gnis_data = [
-        {"Feature Name": "Devil's Fork", "Type": "Stream", "Distance (mi)": 4.2, "Keyword Match": "Devil"},
-        {"Feature Name": "Deadman Branch", "Type": "Stream", "Distance (mi)": 8.7, "Keyword Match": "Dead"},
-        {"Feature Name": "Hell Hole Gap", "Type": "Gap", "Distance (mi)": 14.1, "Keyword Match": "Hell"},
-        {"Feature Name": "Coffin Ridge", "Type": "Ridge", "Distance (mi)": 22.5, "Keyword Match": "Coffin"},
+with tab_field:
+    st.subheader("📌 Log Field Observation")
+    col1, col2 = st.columns(2)
+    with col1:
+        e_title = st.text_input("Observation Title", "Creek Bed Log")
+        e_lat = st.number_input("Latitude", value=st.session_state.center_lat, format="%.6f")
+        e_lon = st.number_input("Longitude", value=st.session_state.center_lon, format="%.6f")
+        e_priv = st.radio("Privacy Setting", ["Public", "Private"])
+    with col2:
+        e_notes = st.text_area("Field Description & Environmental Notes", height=120)
+        st.file_uploader("Attach Photo / Cast Picture", type=["jpg", "png"])
+        st.file_uploader("Attach Audio Recording", type=["mp3", "wav"])
+
+    if st.button("💾 Save Observation Pin"):
+        st.session_state.community_notes.append({
+            "title": e_title, "lat": e_lat, "lon": e_lon, 
+            "privacy": e_priv, "notes": e_notes
+        })
+        st.success("Field report saved to map!")
+
+# ------------------------------------------
+# TAB 3: NEWSPAPER ARCHIVES & TOPONYMS
+# ------------------------------------------
+with tab_archives:
+    st.subheader("📰 Local Historical News Archives & Toponyms")
+    st.markdown("**Search Keywords Included:** `wild man`, `wildman`, `hairy giant`, `ape man`")
+    news_records = [
+        {"Date": "1888-04-12", "Publication": "WNC Democrat", "Headline": "'Hairy Giant' Terrorizes Local Ridge Farmers", "Matched Keyword": "hairy giant"},
+        {"Date": "1923-11-14", "Publication": "Asheville Citizen-Times", "Headline": "'Wild Man' Reported in Unaka Mountains", "Matched Keyword": "wild man"},
     ]
-    st.table(gnis_data)
+    st.dataframe(pd.DataFrame(news_records), use_container_width=True)
 
 # ------------------------------------------
-# TAB 3: WITNESS REPORT PARSER
+# TAB 4: WITNESS REPORT DATA FILTER
 # ------------------------------------------
 with tab_parser:
     st.subheader("Witness Report Objective Data Extractor")
-    st.write("Paste a raw witness statement below to parse **Concrete Physical Observations** from **Witness Conjecture**.")
-    
-    sample_text = """We were fishing near the river late at night. Out of nowhere, all insect noises completely stopped.
-Then something threw a heavy rock into the river about 20 yards away, followed by a foul rotten sulfur smell.
-I heard a deep, low-frequency growl that shook my chest.
-I felt in my gut that it was telepathic and was trying to warn us that it was going to attack us if we didn't leave."""
-
-    user_report = st.text_area("Raw Witness Statement", value=sample_text, height=180)
-    
-    if st.button("Extract Data & Parse"):
-        concrete, conjecture = parse_witness_report(user_report)
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.success("🟢 Concrete Observations (Raw Data)")
-            if concrete:
-                for line in concrete:
-                    st.markdown(f"- {line}")
-            else:
-                st.write("No concrete observations identified.")
-                
-        with col2:
-            st.warning("🟡 Witness Conjecture & Subjective Claims")
-            if conjecture:
-                for line in conjecture:
-                    st.markdown(f"- {line}")
-            else:
-                st.write("No conjecture identified.")
+    raw = st.text_area("Paste Raw Witness Statement", height=120)
+    if st.button("Parse Report"):
+        lines = raw.split('\n')
+        concrete = [l for l in lines if not any(w in l.lower() for w in ["felt", "thought", "believed", "telepathic", "afraid"])]
+        conjecture = [l for l in lines if any(w in l.lower() for w in ["felt", "thought", "believed", "telepathic", "afraid"])]
+        c1, c2 = st.columns(2)
+        with c1:
+            st.success("🟢 Concrete Observations")
+            for c in concrete: st.markdown(f"- {c}")
+        with c2:
+            st.warning("🟡 Witness Conjecture")
+            for c in *conjecture: st.markdown(f"- {c}")
 
 # ------------------------------------------
-# TAB 4: ONX / GPX EXPORTER
+# TAB 5: ONX / GPX EXPORTER
 # ------------------------------------------
 with tab_export:
-    st.subheader("Export Targets to onX Maps / Field Navigation")
-    st.write("Generate a standard `.GPX` file to import target coordinates straight into **onX Offroad** or **Gaia GPS**.")
-    
-    gpx_template = f"""<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="CryptidGIS">
-  <wpt lat="{lat_input}" lon="{lon_input}">
-    <name>Target Center Point</name>
-    <desc>Cryptid GIS Target Center</desc>
-  </wpt>
-  <wpt lat="{lat_input + 0.04}" lon="{lon_input - 0.03}">
-    <name>BFRO Sighting Node</name>
-    <desc>Class A Sighting Spot</desc>
-  </wpt>
-</gpx>"""
-
-    st.code(gpx_template, language="xml")
-    
-    st.download_button(
-        label="📥 Download .GPX File for onX Maps",
-        data=gpx_template,
-        file_name=f"cryptid_target_{lat_input}_{lon_input}.gpx",
-        mime="application/gpx+xml"
-    )
+    st.subheader("Export Center Point to onX Maps / Field GPS")
+    gpx = f"""<?xml version="1.0"?><gpx version="1.1"><wpt lat="{st.session_state.center_lat}" lon="{st.session_state.center_lon}"><name>Target Center</name></wpt></gpx>"""
+    st.code(gpx, language="xml")
+    st.download_button("📥 Download .GPX File for onX", data=gpx, file_name="target_location.gpx")
