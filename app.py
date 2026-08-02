@@ -4,6 +4,7 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
+from streamlit_js_eval import get_geolocation
 
 # ==========================================
 # 1. PAGE SETUP & WORKING TITLE
@@ -32,18 +33,18 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
-# Initialize Location State
+# Initialize Location State (Fallback to MA region if session state is empty)
 if "user_lat" not in st.session_state:
-    st.session_state.user_lat = 35.944444
+    st.session_state.user_lat = 41.7000
 if "user_lon" not in st.session_state:
-    st.session_state.user_lon = -82.772333
+    st.session_state.user_lon = -70.3000
 if "location_name" not in st.session_state:
-    st.session_state.location_name = "Madison County, NC"
+    st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v4")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v5")
 
 # ==========================================
-# 3. HISTORIC TRIBAL TERRITORY POLYGONS (US & CANADA)
+# 3. HISTORIC TRIBAL TERRITORY POLYGONS
 # ==========================================
 TRIBAL_BOUNDARIES = {
     "Eastern Band of Cherokee": Polygon([
@@ -71,8 +72,9 @@ TRIBAL_BOUNDARIES = {
         (-155.0, 58.0), (-155.0, 68.0), (-130.0, 68.0), (-130.0, 58.0), (-155.0, 58.0)
     ])
 }
+
 # ==========================================
-# 4. SEARCH CONTROLS & LAYER TOGGLES
+# 4. SEARCH CONTROLS & GEOLOCATION
 # ==========================================
 col_input, col_radius, col_btn = st.columns([3, 1, 1])
 
@@ -85,7 +87,7 @@ with col_radius:
 
 with col_btn:
     st.write("")
-    if st.button("🔎 Update Map"):
+    if st.button("🔎 Search Area"):
         if loc_search:
             try:
                 location = geolocator.geocode(loc_search)
@@ -96,22 +98,37 @@ with col_btn:
             except Exception:
                 st.error("Geocoding service busy. Please try again.")
 
+# Mobile GPS Auto-Location Button
+if st.button("📲 Use My Current Device GPS"):
+    loc = get_geolocation()
+    if loc and "coords" in loc:
+        st.session_state.user_lat = loc["coords"]["latitude"]
+        st.session_state.user_lon = loc["coords"]["longitude"]
+        st.session_state.location_name = f"Current GPS ({st.session_state.user_lat:.4f}, {st.session_state.user_lon:.4f})"
+        st.rerun()
+
 lat = st.session_state.user_lat
 lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
 
-# Layer Controls
+# Layer Toggles
 st.markdown("**Active Layers:**")
 c1, c2 = st.columns(2)
 show_bfro = c1.checkbox("👣 BFRO Verified Sightings (Blue)", value=True)
 show_lore = c2.checkbox("🪶 Regional Indigenous Lore (Orange)", value=True)
 
 # ==========================================
-# 5. MAP ENGINE & LAYER PRIORITY
+# 5. TERRAIN MAP ENGINE
 # ==========================================
-m = folium.Map(location=[lat, lon], zoom_start=9, tiles="OpenStreetMap")
+# Uses OpenTopoMap for topographic/elevation detail
+m = folium.Map(
+    location=[lat, lon], 
+    zoom_start=9, 
+    tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attr="OpenTopoMap"
+)
 
-# Red Pin: Center Target
+# Target Center Marker
 folium.Marker(
     [lat, lon],
     popup=f"<b>Target Location</b><br>{loc_name}",
@@ -119,7 +136,7 @@ folium.Marker(
 ).add_to(m)
 
 # ------------------------------------------
-# LAYER 1 (DRAWN FIRST): BFRO SIGHTINGS (BLUE PINS)
+# LAYER 1: SIGHTINGS FROM SUPABASE (DRAWN FIRST)
 # ------------------------------------------
 sightings_count = 0
 if show_bfro and supabase:
@@ -169,7 +186,7 @@ if show_bfro and supabase:
         st.warning(f"Database query error: {e}")
 
 # ------------------------------------------
-# LAYER 2 (DRAWN LAST = TOP PRIORITY): SPATIAL LORE
+# LAYER 2: SPATIAL LORE (DRAWN LAST = TOP PRIORITY)
 # ------------------------------------------
 if show_lore and supabase:
     search_point = Point(lon, lat)
@@ -191,7 +208,6 @@ if show_lore and supabase:
             lore_records = lore_response.data
 
             for lore in lore_records:
-                # Self-contained card with full narrative text
                 lore_popup = f"""
                 <div style="font-family: sans-serif; width: 260px; max-height: 300px; overflow-y: auto;">
                     <b style="color:#d35400; font-size: 14px;">🪶 {lore['tribe_name']} Oral History</b><br>
@@ -203,12 +219,11 @@ if show_lore and supabase:
                 </div>
                 """
                 
-                # Placed last so it layers on top of all blue pins
                 folium.Marker(
                     [lat + 0.015, lon + 0.015],
                     popup=folium.Popup(lore_popup, max_width=280),
                     icon=folium.Icon(color="orange", icon="feather", prefix="fa"),
-                    z_index_offset=1000  # Forces icon to float over other markers
+                    z_index_offset=1000
                 ).add_to(m)
 
         except Exception as e:
