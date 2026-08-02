@@ -43,7 +43,7 @@ if "location_name" not in st.session_state:
 geolocator = Nominatim(user_agent="bigfoot_field_platform_v4")
 
 # ==========================================
-# 3. HISTORIC TRIBAL TERRITORY POLYGONS
+# 3. HISTORIC TRIBAL TERRITORY POLYGONS (US & CANADA)
 # ==========================================
 TRIBAL_BOUNDARIES = {
     "Eastern Band of Cherokee": Polygon([
@@ -51,9 +51,26 @@ TRIBAL_BOUNDARIES = {
     ]),
     "Coast Salish / Halkomelem": Polygon([
         (-125.0, 46.5), (-125.0, 50.0), (-121.0, 50.0), (-121.0, 46.5), (-125.0, 46.5)
+    ]),
+    "Choctaw Nation": Polygon([
+        (-90.5, 30.5), (-90.5, 35.0), (-87.0, 35.0), (-87.0, 30.5), (-90.5, 30.5)
+    ]),
+    "Klamath / Modoc / Yurok": Polygon([
+        (-124.5, 40.0), (-124.5, 44.0), (-120.0, 44.0), (-120.0, 40.0), (-124.5, 40.0)
+    ]),
+    "Ojibwe / Anishinaabe": Polygon([
+        (-95.0, 44.0), (-95.0, 50.0), (-80.0, 50.0), (-80.0, 44.0), (-95.0, 44.0)
+    ]),
+    "Cree Nation": Polygon([
+        (-120.0, 51.0), (-120.0, 60.0), (-70.0, 60.0), (-70.0, 51.0), (-120.0, 51.0)
+    ]),
+    "Haudenosaunee / Iroquois": Polygon([
+        (-79.0, 41.0), (-79.0, 46.0), (-71.0, 46.0), (-71.0, 41.0), (-79.0, 41.0)
+    ]),
+    "Tlingit / Athabascan": Polygon([
+        (-155.0, 58.0), (-155.0, 68.0), (-130.0, 68.0), (-130.0, 58.0), (-155.0, 58.0)
     ])
 }
-
 # ==========================================
 # 4. SEARCH CONTROLS & LAYER TOGGLES
 # ==========================================
