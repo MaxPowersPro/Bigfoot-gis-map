@@ -2,22 +2,23 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
+import urllib.parse
 from supabase import create_client, Client
 
 # ==========================================
-# 1. PAGE SETUP & MOBILE STYLING
+# 1. PAGE SETUP
 # ==========================================
 st.set_page_config(
-    page_title="Bigfoot Sightings Nearby",
+    page_title="Bigfoot & Historical Archive Map",
     page_icon="👣",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-st.title("👣 Bigfoot Sightings Near You")
+st.title("👣 Bigfoot Sightings, Native Lore & Historical Newspapers")
 
 # ==========================================
-# 2. SUPABASE CLOUD CONNECTION
+# 2. SUPABASE DATABASE CONNECTION
 # ==========================================
 @st.cache_resource
 def init_supabase():
@@ -30,25 +31,32 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
-# Initialize location state (Defaults to Madison County, NC)
+# Default Location State (Madison County, NC)
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 35.944444
 if "user_lon" not in st.session_state:
     st.session_state.user_lon = -82.772333
+if "location_name" not in st.session_state:
+    st.session_state.location_name = "Madison County, NC"
 
-geolocator = Nominatim(user_agent="bigfoot_mobile_locator_v2")
+geolocator = Nominatim(user_agent="bigfoot_multi_layer_locator")
+
+# Helper for Library of Congress search URLs
+def get_loc_archive_url(query, location=""):
+    full_query = f"{query} {location}".strip()
+    encoded = urllib.parse.quote(full_query)
+    return f"https://chroniclingamerica.loc.gov/search/pages/results/?searchType=basic&terms={encoded}"
 
 # ==========================================
-# 3. SEARCH CONTROLS
+# 3. SEARCH CONTROLS & LAYER TOGGLES
 # ==========================================
 col_input, col_radius, col_btn = st.columns([3, 1, 1])
 
 with col_input:
-    loc_search = st.text_input("📍 Enter Location (City, County, or Zip)", placeholder="e.g. Asheville, NC or Madison County NC")
+    loc_search = st.text_input("📍 Enter Target Location", value=st.session_state.location_name)
 
 with col_radius:
     radius_miles = st.selectbox("Search Radius", [25, 50, 100, 250], index=1)
-    # Convert miles to approximate latitude/longitude degrees (1 degree ~ 69 miles)
     deg_delta = radius_miles / 69.0
 
 with col_btn:
@@ -60,33 +68,39 @@ with col_btn:
                 if location:
                     st.session_state.user_lat = location.latitude
                     st.session_state.user_lon = location.longitude
-                    st.success(f"Locked to: {location.address}")
-                else:
-                    st.error("Location not found. Try adding a state abbreviation.")
+                    st.session_state.location_name = location.address
             except Exception:
-                st.error("Geocoding service timed out. Please try again.")
+                st.error("Geocoding service timed out.")
 
-# Active coordinates
 lat = st.session_state.user_lat
 lon = st.session_state.user_lon
+loc_name = st.session_state.location_name
+
+# Layer Checkboxes
+st.markdown("**Map Layers:**")
+c1, c2, c3 = st.columns(3)
+show_bfro = c1.checkbox("👣 BFRO Sightings (Blue)", value=True)
+show_lore = c2.checkbox("🪶 Native American Lore (Orange)", value=True)
+show_news = c3.checkbox("📰 Historical Newspaper Articles (Green)", value=True)
 
 # ==========================================
-# 4. MAP ENGINE & SIGHTINGS QUERY
+# 4. MAP ENGINE WITH MULTI-ICON LAYERS
 # ==========================================
 m = folium.Map(location=[lat, lon], zoom_start=9, tiles="OpenStreetMap")
 
-# Red Pin: User's Search Location
+# Red Pin: Active Search Center
 folium.Marker(
     [lat, lon],
-    popup="<b>Search Center Target</b>",
+    popup=f"<b>Target Center</b><br>{loc_name}",
     icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")
 ).add_to(m)
 
+# ------------------------------------------
+# LAYER 1: BFRO SIGHTINGS (Blue Tree Pins)
+# ------------------------------------------
 sightings_count = 0
-
-if supabase:
+if show_bfro and supabase:
     try:
-        # Bounding box around search target
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
 
@@ -104,41 +118,77 @@ if supabase:
         sightings_count = len(sightings)
 
         for report in sightings:
-            # Clean and validate the report_id
             raw_id = str(report.get('report_id', '')).strip()
             source = report.get('source', 'BFRO')
-            state_abbr = str(report.get('state', '')).strip()
 
-            # Smart link logic: Only link directly if we have a real numeric report ID
             if source == 'BFRO' and raw_id.isdigit() and len(raw_id) >= 3:
                 full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
-                link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:8px; padding:5px 10px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Read Full Report #{raw_id}</a>'
-            elif state_abbr:
-                # Fallback to state database search page if specific ID isn't linked
-                search_url = f"https://www.bfro.net/GDB/state_listing.asp?state={state_abbr}"
-                link_html = f'<a href="{search_url}" target="_blank" style="display:inline-block; margin-top:8px; padding:5px 10px; background-color:#6c757d; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">🔍 Browse {state_abbr} BFRO Records</a>'
+                link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Read Full Report #{raw_id}</a>'
             else:
                 link_html = ''
 
-            # Build popup container
             popup_content = f"""
-            <div style="font-family: sans-serif; width: 230px;">
-                <b style="color:#2c3e50; font-size:14px;">👣 {report.get('title', 'Sighting Report')}</b><br>
-                <small style="color:#666;"><b>Date:</b> {report.get('event_date', 'N/A')} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
-                <p style="font-size: 12px; margin-top: 6px; margin-bottom: 6px; color:#333; line-height: 1.3;">{report.get('summary', 'No summary details provided.')}</p>
+            <div style="font-family: sans-serif; width: 220px;">
+                <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
+                <small><b>Date:</b> {report.get('event_date', 'N/A')}</small><br>
+                <p style="font-size: 11px; margin-top: 4px;">{report.get('summary', 'No summary details.')}</p>
                 {link_html}
             </div>
             """
 
             folium.Marker(
                 [report["latitude"], report["longitude"]],
-                popup=folium.Popup(popup_content, max_width=260),
+                popup=folium.Popup(popup_content, max_width=250),
                 icon=folium.Icon(color="blue", icon="tree", prefix="fa")
             ).add_to(m)
-
     except Exception as e:
-        st.warning(f"Could not load sightings from database: {e}")
+        st.warning(f"Sighting query issue: {e}")
 
-# Map status banner and display
-st.caption(f"Showing **{sightings_count} sightings** within ~{radius_miles} miles of target area.")
+# ------------------------------------------
+# LAYER 2: NATIVE AMERICAN LORE (Orange Feather Pins)
+# ------------------------------------------
+if show_lore:
+    lore_lat = lat + 0.02
+    lore_lon = lon + 0.02
+    lore_popup = f"""
+    <div style="font-family: sans-serif; width: 230px;">
+        <b style="color:#d35400;">🪶 Native American Oral History</b><br>
+        <small><b>Region:</b> {loc_name}</small>
+        <p style="font-size: 11px; margin-top: 6px;">
+        Indigenous accounts (such as Cherokees' <i>Tsul 'Kalu / Judaculla</i>) describe hair-covered mountain spirits and guardians of high ridges.
+        </p>
+        <a href="https://www.ncpedia.org/judaculla-rock" target="_blank" style="display:inline-block; padding:4px 8px; background-color:#e67e22; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">🪶 Explore Historical Record</a>
+    </div>
+    """
+    folium.Marker(
+        [lore_lat, lore_lon],
+        popup=folium.Popup(lore_popup, max_width=260),
+        icon=folium.Icon(color="orange", icon="feather", prefix="fa")
+    ).add_to(m)
+
+# ------------------------------------------
+# LAYER 3: NEWSPAPER / MEDIA ARCHIVES (Green Newspaper Pins)
+# ------------------------------------------
+if show_news:
+    news_lat = lat - 0.02
+    news_lon = lon - 0.02
+    news_url = get_loc_archive_url("Hairy Giant Wild Man", loc_name)
+    news_popup = f"""
+    <div style="font-family: sans-serif; width: 230px;">
+        <b style="color:#27ae60;">📰 19th-Century Newspaper Archive</b><br>
+        <small><b>Archive:</b> Library of Congress (Chronicling America)</small>
+        <p style="font-size: 11px; margin-top: 6px;">
+        Searches digitized newspapers (1800s–1950s) for "Wild Man" or "Hairy Giant" reports near <b>{loc_name}</b>.
+        </p>
+        <a href="{news_url}" target="_blank" style="display:inline-block; padding:4px 8px; background-color:#27ae60; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📰 View Newspaper Scans</a>
+    </div>
+    """
+    folium.Marker(
+        [news_lat, news_lon],
+        popup=folium.Popup(news_popup, max_width=260),
+        icon=folium.Icon(color="green", icon="newspaper", prefix="fa")
+    ).add_to(m)
+
+# Status & Map Render
+st.caption(f"Loaded **{sightings_count} BFRO sightings** within ~{radius_miles} miles of target.")
 st_folium(m, width="100%", height=550, returned_objects=[])
