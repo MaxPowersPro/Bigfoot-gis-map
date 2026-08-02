@@ -6,7 +6,7 @@ from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
 
 # ==========================================
-# 1. PAGE SETUP & BRANDING
+# 1. PAGE SETUP & WORKING TITLE
 # ==========================================
 st.set_page_config(
     page_title="Bigfoot Field Analysis Platform",
@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 st.title("👣 Bigfoot Field Analysis Platform")
-st.caption("Site-Specific Spatial Map & Multi-Layer Field Analysis Engine")
+st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
 # ==========================================
 # 2. SUPABASE CLOUD CONNECTION
@@ -40,29 +40,22 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Madison County, NC"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v3")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v4")
 
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
 # ==========================================
-# Coordinate boundary polygons (longitude, latitude) for historic territories
 TRIBAL_BOUNDARIES = {
     "Eastern Band of Cherokee": Polygon([
         (-85.5, 33.5), (-85.5, 37.0), (-80.5, 37.0), (-80.5, 33.5), (-85.5, 33.5)
     ]),
     "Coast Salish / Halkomelem": Polygon([
         (-125.0, 46.5), (-125.0, 50.0), (-121.0, 50.0), (-121.0, 46.5), (-125.0, 46.5)
-    ]),
-    "Choctaw Nation": Polygon([
-        (-90.5, 30.5), (-90.5, 35.0), (-87.0, 35.0), (-87.0, 30.5), (-90.5, 30.5)
-    ]),
-    "Klamath / Modoc": Polygon([
-        (-123.0, 41.0), (-123.0, 43.5), (-120.0, 43.5), (-120.0, 41.0), (-123.0, 41.0)
     ])
 }
 
 # ==========================================
-# 4. CONTROLS & LAYER TOGGLES
+# 4. SEARCH CONTROLS & LAYER TOGGLES
 # ==========================================
 col_input, col_radius, col_btn = st.columns([3, 1, 1])
 
@@ -84,20 +77,20 @@ with col_btn:
                     st.session_state.user_lon = location.longitude
                     st.session_state.location_name = location.address
             except Exception:
-                st.error("Geocoding service busy. Try again.")
+                st.error("Geocoding service busy. Please try again.")
 
 lat = st.session_state.user_lat
 lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
 
-# Layer Checkboxes
-st.markdown("**Active Map Layers:**")
+# Layer Controls
+st.markdown("**Active Layers:**")
 c1, c2 = st.columns(2)
 show_bfro = c1.checkbox("👣 BFRO Verified Sightings (Blue)", value=True)
 show_lore = c2.checkbox("🪶 Regional Indigenous Lore (Orange)", value=True)
 
 # ==========================================
-# 5. MAP ENGINE
+# 5. MAP ENGINE & LAYER PRIORITY
 # ==========================================
 m = folium.Map(location=[lat, lon], zoom_start=9, tiles="OpenStreetMap")
 
@@ -109,7 +102,7 @@ folium.Marker(
 ).add_to(m)
 
 # ------------------------------------------
-# LAYER 1: SIGHTINGS FROM SUPABASE
+# LAYER 1 (DRAWN FIRST): BFRO SIGHTINGS (BLUE PINS)
 # ------------------------------------------
 sightings_count = 0
 if show_bfro and supabase:
@@ -159,20 +152,17 @@ if show_bfro and supabase:
         st.warning(f"Database query error: {e}")
 
 # ------------------------------------------
-# LAYER 2: SPATIAL POINT-IN-POLYGON LORE QUERY
+# LAYER 2 (DRAWN LAST = TOP PRIORITY): SPATIAL LORE
 # ------------------------------------------
 if show_lore and supabase:
-    # Convert search coordinate to Geometric Point (lon, lat)
     search_point = Point(lon, lat)
     detected_tribe = None
 
-    # Check which boundary polygon contains the target coordinate
     for tribe_name, polygon in TRIBAL_BOUNDARIES.items():
         if polygon.contains(search_point):
             detected_tribe = tribe_name
             break
 
-    # Strictly query Supabase ONLY if a spatial match occurred
     if detected_tribe:
         try:
             lore_response = (
@@ -183,24 +173,25 @@ if show_lore and supabase:
             )
             lore_records = lore_response.data
 
-            # Drop pin ONLY if database returns actual matching records
             for lore in lore_records:
+                # Self-contained card with full narrative text
                 lore_popup = f"""
-                <div style="font-family: sans-serif; width: 240px;">
-                    <b style="color:#d35400;">🪶 {lore['tribe_name']} Oral History</b><br>
-                    <small><b>Entity:</b> {lore['entity_name']}</small>
-                    <p style="font-size: 11px; margin-top: 6px; margin-bottom: 6px; line-height:1.3;">
-                    {lore['synopsis']}
+                <div style="font-family: sans-serif; width: 260px; max-height: 300px; overflow-y: auto;">
+                    <b style="color:#d35400; font-size: 14px;">🪶 {lore['tribe_name']} Oral History</b><br>
+                    <small style="color:#666;"><b>Entity / Tradition:</b> {lore['entity_name']}</small>
+                    <hr style="margin: 6px 0; border: 0; border-top: 1px solid #eee;">
+                    <p style="font-size: 11px; line-height: 1.4; color: #2c3e50; margin: 0;">
+                        {lore['full_narrative']}
                     </p>
-                    <a href="{lore['source_url']}" target="_blank" style="display:inline-block; padding:4px 8px; background-color:#e67e22; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">🪶 Official Cultural Resource</a>
                 </div>
                 """
                 
-                # Place pin slightly offset from search center so it doesn't overlap the red pin
+                # Placed last so it layers on top of all blue pins
                 folium.Marker(
-                    [lat + 0.01, lon + 0.01],
-                    popup=folium.Popup(lore_popup, max_width=260),
-                    icon=folium.Icon(color="orange", icon="feather", prefix="fa")
+                    [lat + 0.015, lon + 0.015],
+                    popup=folium.Popup(lore_popup, max_width=280),
+                    icon=folium.Icon(color="orange", icon="feather", prefix="fa"),
+                    z_index_offset=1000  # Forces icon to float over other markers
                 ).add_to(m)
 
         except Exception as e:
