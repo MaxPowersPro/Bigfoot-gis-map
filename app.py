@@ -98,16 +98,28 @@ if supabase:
         sightings_count = len(sightings)
 
         for report in sightings:
+            report_id = str(report.get('report_id', '')).strip()
+            source = report.get('source', 'BFRO')
+
+            # Generate direct link to official full report if it's a BFRO record
+            if source == 'BFRO' and report_id.isdigit():
+                full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={report_id}"
+                link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:8px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Read Full Report #{report_id}</a>'
+            else:
+                link_html = ''
+
             popup_content = f"""
-            <div style="font-family: sans-serif; width: 220px;">
-                <b>👣 {report.get('title', 'Sighting Report')}</b><br>
+            <div style="font-family: sans-serif; width: 230px;">
+                <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
                 <small><b>Date:</b> {report.get('event_date', 'N/A')} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
-                <p style="font-size: 12px; margin-top: 6px;">{report.get('summary', 'No description available.')}</p>
+                <p style="font-size: 12px; margin-top: 6px; margin-bottom: 6px; color:#333;">{report.get('summary', 'No description available.')}</p>
+                {link_html}
             </div>
             """
+            
             folium.Marker(
                 [report["latitude"], report["longitude"]],
-                popup=folium.Popup(popup_content, max_width=250),
+                popup=folium.Popup(popup_content, max_width=260),
                 icon=folium.Icon(color="blue", icon="tree", prefix="fa")
             ).add_to(m)
 
