@@ -5,3 +5,4 @@ geopy
 supabase
 pandas
 shapely
+streamlit-js-eval
