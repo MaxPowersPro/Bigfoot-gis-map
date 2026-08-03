@@ -1,11 +1,11 @@
 import streamlit as st
 import folium
-from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
 from streamlit_js_eval import get_geolocation
+import random
 
 # ==========================================
 # 1. PAGE SETUP & WORKING TITLE
@@ -19,36 +19,6 @@ st.set_page_config(
 
 st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
-
-# Custom CSS for Solid Lower-Left Map UI Buttons & Popups
-st.markdown("""
-<style>
-.map-container {
-    position: relative;
-}
-.floating-ui-container {
-    position: absolute;
-    bottom: 30px;
-    left: 20px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-.solid-map-btn {
-    background-color: #1e293b;
-    color: #ffffff !important;
-    border: 2px solid #38bdf8;
-    padding: 10px 16px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 13px;
-    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.5);
-    cursor: pointer;
-    text-align: left;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ==========================================
 # 2. SUPABASE CLOUD CONNECTION
@@ -72,7 +42,32 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v7")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v8")
+
+# Helper Function: Micro-Offsetting Jitter to keep overlapping markers visible
+def apply_jitter(lat_val, lon_val, offset_seed=0):
+    # Deterministic slight offset (~100-200 meters) so overlapping pins sit side-by-side
+    random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
+    lat_jitter = lat_val + random.uniform(-0.003, 0.003)
+    lon_jitter = lon_val + random.uniform(-0.003, 0.003)
+    return lat_jitter, lon_jitter
+
+# Helper Function: Parse Season from Date Strings
+def get_season(date_str):
+    if not date_str or date_str == 'N/A':
+        return 'Unknown'
+    try:
+        month = int(str(date_str).split('-')[1])
+        if month in [12, 1, 2]:
+            return '❄️ Winter'
+        elif month in [3, 4, 5]:
+            return '🌸 Spring'
+        elif month in [6, 7, 8]:
+            return '☀️ Summer'
+        elif month in [9, 10, 11]:
+            return '🍂 Autumn'
+    except Exception:
+        return 'Unknown'
 
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
@@ -113,6 +108,7 @@ with col_input:
     loc_search = st.text_input("📍 Target Search Area", value=st.session_state.location_name)
 
 with col_radius:
+    # 50 miles defaulted for spatial context balance
     radius_miles = st.selectbox("Search Radius", [25, 50, 100, 250], index=1)
     deg_delta = radius_miles / 69.0
 
@@ -145,12 +141,12 @@ loc_name = st.session_state.location_name
 # Layer Toggles
 st.markdown("**Active Map Layers:**")
 c1, c2, c3 = st.columns(3)
-show_bfro = c1.checkbox("👣 BFRO Sightings (Blue)", value=True)
+show_bfro = c1.checkbox("👣 Sighting Tracks (Blue)", value=True)
 show_lore = c2.checkbox("🪶 Indigenous Lore (Orange)", value=True)
-show_news = c3.checkbox("📰 Physical Press Locations (Black)", value=True)
+show_news = c3.checkbox("📰 Historic Press Sites (Black)", value=True)
 
 # ==========================================
-# 5. TOPOGRAPHIC MAP ENGINE & CLUSTERING
+# 5. TOPOGRAPHIC MAP ENGINE
 # ==========================================
 m = folium.Map(
     location=[lat, lon], 
@@ -159,20 +155,19 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
-# Enable MarkerCluster with Spiderfy so overlapping pins fan out cleanly
-marker_cluster = MarkerCluster(spiderfyOnMaxZoom=True, showCoverageOnHover=False).add_to(m)
-
-# Target Center Marker
+# Target Center Marker (Red)
 folium.Marker(
     [lat, lon],
     popup=f"<b>Target Location</b><br>{loc_name}",
     icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")
-).add_to(marker_cluster)
+).add_to(m)
 
 # ------------------------------------------
-# LAYER 1: SIGHTINGS (BLUE PINS)
+# LAYER 1: SIGHTINGS (BLUE FOOTPRINT PINS)
 # ------------------------------------------
 sightings_count = 0
+seasonal_breakdown = {}
+
 if show_bfro and supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
@@ -194,6 +189,11 @@ if show_bfro and supabase:
         for report in sightings:
             raw_id = str(report.get('report_id', '')).strip()
             source = report.get('source', 'BFRO')
+            event_date = report.get('event_date', 'N/A')
+
+            # Aggregate seasonal stats
+            season = get_season(event_date)
+            seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
 
             if source == 'BFRO' and raw_id.isdigit() and len(raw_id) >= 3:
                 full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
@@ -204,23 +204,27 @@ if show_bfro and supabase:
             popup_content = f"""
             <div style="font-family: sans-serif; width: 220px;">
                 <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
-                <small><b>Date:</b> {report.get('event_date', 'N/A')} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
+                <small><b>Date:</b> {event_date} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
                 <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
                 {link_html}
             </div>
             """
 
+            # Micro-offset jitter for layer visibility
+            j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
+
             folium.Marker(
-                [report["latitude"], report["longitude"]],
+                [j_lat, j_lon],
                 popup=folium.Popup(popup_content, max_width=250),
-                icon=folium.Icon(color="blue", icon="tree", prefix="fa")
-            ).add_to(marker_cluster)
+                icon=folium.Icon(color="blue", icon="shoe-prints", prefix="fa"),
+                z_index_offset=500
+            ).add_to(m)
 
     except Exception as e:
         st.warning(f"Sighting query error: {e}")
 
 # ------------------------------------------
-# LAYER 2: SPATIAL LORE & AMBIENT MEDIA DATA
+# LAYER 2: SPATIAL LORE (ORANGE FEATHER PINS)
 # ------------------------------------------
 detected_lore = []
 search_point = Point(lon, lat)
@@ -241,12 +245,13 @@ if supabase:
                         <p style="font-size: 11px; line-height: 1.4;">{lore['full_narrative']}</p>
                     </div>
                     """
+                    # Offset slightly to upper-right so orange pin sits clear of target red pin
                     folium.Marker(
-                        [lat + 0.01, lon + 0.01],
+                        [lat + 0.008, lon + 0.008],
                         popup=folium.Popup(lore_popup, max_width=280),
                         icon=folium.Icon(color="orange", icon="feather", prefix="fa"),
                         z_index_offset=1000
-                    ).add_to(marker_cluster)
+                    ).add_to(m)
 
 # ------------------------------------------
 # LAYER 3: HISTORICAL NEWSPAPERS (BLACK HIGH-CONTRAST PINS)
@@ -282,12 +287,16 @@ if supabase:
                         <p style="font-size: 11px; line-height: 1.3;">{article['full_text_transcript']}</p>
                     </div>
                     """
+                    
+                    # Micro-offset jitter for media pins
+                    j_lat, j_lon = apply_jitter(float(art_lat), float(art_lon), offset_seed=2)
+
                     folium.Marker(
-                        [float(art_lat), float(art_lon)],
+                        [j_lat, j_lon],
                         popup=folium.Popup(media_popup, max_width=270),
                         icon=folium.Icon(color="black", icon="newspaper", prefix="fa"),
                         z_index_offset=900
-                    ).add_to(marker_cluster)
+                    ).add_to(m)
 
     except Exception as e:
         st.warning(f"Media query error: {e}")
@@ -297,11 +306,12 @@ st.caption(f"Loaded **{sightings_count} verified sightings** within ~{radius_mil
 st_folium(m, width="100%", height=550, returned_objects=[])
 
 # ==========================================
-# 6. LOWER-LEFT SOLID UI CONTROLS & OVERLAYS
+# 6. REGIONAL FIELD CONTEXT & SEASONAL PANEL
 # ==========================================
-st.markdown("### 🗂️ Regional Field Context & Media Panel")
+st.markdown("---")
+st.markdown("### 🗂️ Regional Field Context & Intelligence Panel")
 
-col_lore_btn, col_media_btn = st.columns(2)
+col_lore_btn, col_media_btn, col_season_btn = st.columns(3)
 
 with col_lore_btn:
     if detected_lore:
@@ -314,11 +324,19 @@ with col_lore_btn:
 
 with col_media_btn:
     if local_media_records:
-        with st.expander(f"📰 Local Press & Print Media ({len(local_media_records)})", expanded=False):
+        with st.expander(f"📰 Local Press & Archives ({len(local_media_records)})", expanded=False):
             for media_item in local_media_records:
                 st.markdown(f"**📰 {media_item['title']}**")
                 st.caption(f"{media_item['publication_name']} | {media_item['pub_date']} | {media_item['county']}, {media_item['state_province']}")
-                st.write(f"* **Synopsis / Transcript:** {media_item['full_text_transcript']}")
+                st.write(f"* **Transcript:** {media_item['full_text_transcript']}")
                 st.markdown("---")
     else:
-        st.info(f"No historical print accounts tagged within {radius_miles} miles.")
+        st.info(f"No historical press accounts tagged within {radius_miles} miles.")
+
+with col_season_btn:
+    with st.expander("🍂 Seasonal Activity Breakdown", expanded=False):
+        if seasonal_breakdown:
+            for season_name, count in seasonal_breakdown.items():
+                st.markdown(f"**{season_name}:** {count} reports")
+        else:
+            st.info("No dated sighting activity in this active search area.")
