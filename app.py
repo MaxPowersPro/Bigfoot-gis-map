@@ -228,7 +228,56 @@ if show_lore and supabase:
 
         except Exception as e:
             st.warning(f"Lore query error: {e}")
-
+INSERT INTO historical_media (title, publication_name, pub_date, county, state_province, media_category, full_text_transcript, image_url, latitude, longitude)
+VALUES 
+(
+    'The Wild Man of the Adirondacks',
+    'The Plattsburgh Sentinel',
+    '1895-07-19',
+    'Clinton County',
+    'NY',
+    'Newspaper',
+    'Reports come from the dense timber near Chateaugay Lake of a strange, powerful creature haunting the high ridges. Hunters describe a massive, hair-covered figure capable of moving with incredible speed through heavy underbrush. Several local guides report finding uncommonly large footprints near water crossings, sparking intense debate among local woodsmen.',
+    NULL,
+    44.7500,
+    -73.9800
+),
+(
+    'Strange Wild Creature Seen Near Whitehall',
+    'The Whitehall Times',
+    '1915-10-14',
+    'Washington County',
+    'NY',
+    'Newspaper',
+    'A local farmer driving along the outskirts of town near South Mountain reports observing a large, dark, upright creature crossing an open clearing toward the dense woods. The entity moved on two legs with immense strides before vanishing into the heavy forest cover. Similar sightings have been whispered about by timber workers in the region for decades.',
+    NULL,
+    43.5556,
+    -73.4022
+),
+(
+    'The Berkshire Monster Legend Recalled',
+    'The Berkshire County Eagle',
+    1922-08-03,
+    'Berkshire County',
+    'MA',
+    'Newspaper',
+    'Old timber workers and camp caretakers in the high elevation forests surrounding Mount Greylock recall strange nocturnal vocalizations and giant tracks observed near remote streams. While frequently dismissed as wild animals, local accounts maintain that deep wilderness pockets in the Berkshire range harbor reclusive, unknown creatures.',
+    NULL,
+    42.6373,
+    -73.1662
+),
+(
+    'Mysterious Wilderness Wanderer of Coos County',
+    'The Coos County Democrat',
+    '1908-11-20',
+    'Coos County',
+    'NH',
+    'Newspaper',
+    'Lumber crews operating near the Canadian border report encountering an unusually large, hair-covered figure along remote haul roads late at night. The creature reportedly watched the logging camp from the treeline before retreating silently into the thick spruce bogs without leaving a traceable trail.',
+    NULL,
+    44.8000,
+    -71.3000
+);
 # Render Status & Map
 st.caption(f"Loaded **{sightings_count} verified sightings** within ~{radius_miles} miles of target area.")
 st_folium(m, width="100%", height=550, returned_objects=[])
