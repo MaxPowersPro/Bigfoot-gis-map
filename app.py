@@ -41,7 +41,7 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v5")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v6")
 
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
@@ -112,15 +112,15 @@ lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
 
 # Layer Toggles
-st.markdown("**Active Layers:**")
-c1, c2 = st.columns(2)
-show_bfro = c1.checkbox("👣 BFRO Verified Sightings (Blue)", value=True)
-show_lore = c2.checkbox("🪶 Regional Indigenous Lore (Orange)", value=True)
+st.markdown("**Active Map Layers:**")
+c1, c2, c3 = st.columns(3)
+show_bfro = c1.checkbox("👣 BFRO Sightings (Blue)", value=True)
+show_lore = c2.checkbox("🪶 Indigenous Lore (Orange)", value=True)
+show_news = c3.checkbox("📰 Historical Press Pins (Green)", value=True)
 
 # ==========================================
 # 5. TERRAIN MAP ENGINE
 # ==========================================
-# Uses OpenTopoMap for topographic/elevation detail
 m = folium.Map(
     location=[lat, lon], 
     zoom_start=9, 
@@ -136,7 +136,7 @@ folium.Marker(
 ).add_to(m)
 
 # ------------------------------------------
-# LAYER 1: SIGHTINGS FROM SUPABASE (DRAWN FIRST)
+# LAYER 1: SIGHTINGS FROM SUPABASE (BLUE PINS)
 # ------------------------------------------
 sightings_count = 0
 if show_bfro and supabase:
@@ -183,10 +183,10 @@ if show_bfro and supabase:
             ).add_to(m)
 
     except Exception as e:
-        st.warning(f"Database query error: {e}")
+        st.warning(f"Sighting database query error: {e}")
 
 # ------------------------------------------
-# LAYER 2: SPATIAL LORE (DRAWN LAST = TOP PRIORITY)
+# LAYER 2: SPATIAL LORE (ORANGE FEATHER PINS)
 # ------------------------------------------
 if show_lore and supabase:
     search_point = Point(lon, lat)
@@ -228,56 +228,58 @@ if show_lore and supabase:
 
         except Exception as e:
             st.warning(f"Lore query error: {e}")
-INSERT INTO historical_media (title, publication_name, pub_date, county, state_province, media_category, full_text_transcript, image_url, latitude, longitude)
-VALUES 
-(
-    'The Wild Man of the Adirondacks',
-    'The Plattsburgh Sentinel',
-    '1895-07-19',
-    'Clinton County',
-    'NY',
-    'Newspaper',
-    'Reports come from the dense timber near Chateaugay Lake of a strange, powerful creature haunting the high ridges. Hunters describe a massive, hair-covered figure capable of moving with incredible speed through heavy underbrush. Several local guides report finding uncommonly large footprints near water crossings, sparking intense debate among local woodsmen.',
-    NULL,
-    44.7500,
-    -73.9800
-),
-(
-    'Strange Wild Creature Seen Near Whitehall',
-    'The Whitehall Times',
-    '1915-10-14',
-    'Washington County',
-    'NY',
-    'Newspaper',
-    'A local farmer driving along the outskirts of town near South Mountain reports observing a large, dark, upright creature crossing an open clearing toward the dense woods. The entity moved on two legs with immense strides before vanishing into the heavy forest cover. Similar sightings have been whispered about by timber workers in the region for decades.',
-    NULL,
-    43.5556,
-    -73.4022
-),
-(
-    'The Berkshire Monster Legend Recalled',
-    'The Berkshire County Eagle',
-    1922-08-03,
-    'Berkshire County',
-    'MA',
-    'Newspaper',
-    'Old timber workers and camp caretakers in the high elevation forests surrounding Mount Greylock recall strange nocturnal vocalizations and giant tracks observed near remote streams. While frequently dismissed as wild animals, local accounts maintain that deep wilderness pockets in the Berkshire range harbor reclusive, unknown creatures.',
-    NULL,
-    42.6373,
-    -73.1662
-),
-(
-    'Mysterious Wilderness Wanderer of Coos County',
-    'The Coos County Democrat',
-    '1908-11-20',
-    'Coos County',
-    'NH',
-    'Newspaper',
-    'Lumber crews operating near the Canadian border report encountering an unusually large, hair-covered figure along remote haul roads late at night. The creature reportedly watched the logging camp from the treeline before retreating silently into the thick spruce bogs without leaving a traceable trail.',
-    NULL,
-    44.8000,
-    -71.3000
-);
-# Render Status & Map
+
+# ------------------------------------------
+# LAYER 3: HISTORICAL NEWSPAPERS (GREEN MAP PINS)
+# ------------------------------------------
+media_records = []
+if supabase:
+    try:
+        media_response = supabase.table("historical_media").select("*").execute()
+        media_records = media_response.data
+
+        if show_news:
+            for article in media_records:
+                art_lat = article.get("latitude")
+                art_lon = article.get("longitude")
+
+                if art_lat and art_lon:
+                    media_popup = f"""
+                    <div style="font-family: sans-serif; width: 250px; max-height: 280px; overflow-y: auto;">
+                        <b style="color:#27ae60; font-size: 13px;">📰 {article['title']}</b><br>
+                        <small style="color:#555;"><b>Source:</b> {article['publication_name']} ({article['pub_date']})</small><br>
+                        <small style="color:#777;"><b>Location:</b> {article['county']}, {article['state_province']}</small>
+                        <hr style="margin: 6px 0; border: 0; border-top: 1px solid #eee;">
+                        <p style="font-size: 11px; line-height: 1.3; color: #2c3e50; margin: 0;">
+                            {article['full_text_transcript']}
+                        </p>
+                    </div>
+                    """
+                    
+                    folium.Marker(
+                        [float(art_lat), float(art_lon)],
+                        popup=folium.Popup(media_popup, max_width=270),
+                        icon=folium.Icon(color="green", icon="newspaper", prefix="fa"),
+                        z_index_offset=900
+                    ).add_to(m)
+
+    except Exception as e:
+        st.warning(f"Error querying historical media: {e}")
+
+# Render Map & Status
 st.caption(f"Loaded **{sightings_count} verified sightings** within ~{radius_miles} miles of target area.")
 st_folium(m, width="100%", height=550, returned_objects=[])
+
+# ------------------------------------------
+# 6. EXPANDABLE REGIONAL MEDIA DRAWER (BELOW MAP)
+# ------------------------------------------
+st.markdown("---")
+with st.expander("📚 View Historical Media & Press Accounts Archive", expanded=False):
+    if media_records:
+        for item in media_records:
+            st.markdown(f"### 📰 {item['title']}")
+            st.caption(f"**Publication:** {item['publication_name']} | **Date:** {item['pub_date']} | **Location:** {item['county']}, {item['state_province']}")
+            st.write(f"> {item['full_text_transcript']}")
+            st.markdown("---")
+    else:
+        st.info("No historical media records currently in archive.")
