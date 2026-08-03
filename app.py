@@ -1,5 +1,6 @@
 import streamlit as st
 import folium
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from shapely.geometry import Point, Polygon
@@ -19,6 +20,36 @@ st.set_page_config(
 st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
+# Custom CSS for Solid Lower-Left Map UI Buttons & Popups
+st.markdown("""
+<style>
+.map-container {
+    position: relative;
+}
+.floating-ui-container {
+    position: absolute;
+    bottom: 30px;
+    left: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.solid-map-btn {
+    background-color: #1e293b;
+    color: #ffffff !important;
+    border: 2px solid #38bdf8;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 13px;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    text-align: left;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ==========================================
 # 2. SUPABASE CLOUD CONNECTION
 # ==========================================
@@ -33,7 +64,7 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
-# Initialize Location State (Fallback to MA region if session state is empty)
+# Initialize Location State (Fallback to MA region)
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
 if "user_lon" not in st.session_state:
@@ -41,7 +72,7 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v6")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v7")
 
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
@@ -116,10 +147,10 @@ st.markdown("**Active Map Layers:**")
 c1, c2, c3 = st.columns(3)
 show_bfro = c1.checkbox("👣 BFRO Sightings (Blue)", value=True)
 show_lore = c2.checkbox("🪶 Indigenous Lore (Orange)", value=True)
-show_news = c3.checkbox("📰 Historical Press Pins (Green)", value=True)
+show_news = c3.checkbox("📰 Physical Press Locations (Black)", value=True)
 
 # ==========================================
-# 5. TERRAIN MAP ENGINE
+# 5. TOPOGRAPHIC MAP ENGINE & CLUSTERING
 # ==========================================
 m = folium.Map(
     location=[lat, lon], 
@@ -128,15 +159,18 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
+# Enable MarkerCluster with Spiderfy so overlapping pins fan out cleanly
+marker_cluster = MarkerCluster(spiderfyOnMaxZoom=True, showCoverageOnHover=False).add_to(m)
+
 # Target Center Marker
 folium.Marker(
     [lat, lon],
     popup=f"<b>Target Location</b><br>{loc_name}",
     icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")
-).add_to(m)
+).add_to(marker_cluster)
 
 # ------------------------------------------
-# LAYER 1: SIGHTINGS FROM SUPABASE (BLUE PINS)
+# LAYER 1: SIGHTINGS (BLUE PINS)
 # ------------------------------------------
 sightings_count = 0
 if show_bfro and supabase:
@@ -180,106 +214,111 @@ if show_bfro and supabase:
                 [report["latitude"], report["longitude"]],
                 popup=folium.Popup(popup_content, max_width=250),
                 icon=folium.Icon(color="blue", icon="tree", prefix="fa")
-            ).add_to(m)
+            ).add_to(marker_cluster)
 
     except Exception as e:
-        st.warning(f"Sighting database query error: {e}")
+        st.warning(f"Sighting query error: {e}")
 
 # ------------------------------------------
-# LAYER 2: SPATIAL LORE (ORANGE FEATHER PINS)
+# LAYER 2: SPATIAL LORE & AMBIENT MEDIA DATA
 # ------------------------------------------
-if show_lore and supabase:
-    search_point = Point(lon, lat)
-    detected_tribe = None
+detected_lore = []
+search_point = Point(lon, lat)
 
+if supabase:
     for tribe_name, polygon in TRIBAL_BOUNDARIES.items():
         if polygon.contains(search_point):
-            detected_tribe = tribe_name
-            break
+            lore_resp = supabase.table("tribal_lore").select("*").eq("tribe_name", tribe_name).execute()
+            if lore_resp.data:
+                detected_lore.extend(lore_resp.data)
 
-    if detected_tribe:
-        try:
-            lore_response = (
-                supabase.table("tribal_lore")
-                .select("*")
-                .eq("tribe_name", detected_tribe)
-                .execute()
-            )
-            lore_records = lore_response.data
-
-            for lore in lore_records:
-                lore_popup = f"""
-                <div style="font-family: sans-serif; width: 260px; max-height: 300px; overflow-y: auto;">
-                    <b style="color:#d35400; font-size: 14px;">🪶 {lore['tribe_name']} Oral History</b><br>
-                    <small style="color:#666;"><b>Entity / Tradition:</b> {lore['entity_name']}</small>
-                    <hr style="margin: 6px 0; border: 0; border-top: 1px solid #eee;">
-                    <p style="font-size: 11px; line-height: 1.4; color: #2c3e50; margin: 0;">
-                        {lore['full_narrative']}
-                    </p>
-                </div>
-                """
-                
-                folium.Marker(
-                    [lat + 0.015, lon + 0.015],
-                    popup=folium.Popup(lore_popup, max_width=280),
-                    icon=folium.Icon(color="orange", icon="feather", prefix="fa"),
-                    z_index_offset=1000
-                ).add_to(m)
-
-        except Exception as e:
-            st.warning(f"Lore query error: {e}")
+            if show_lore:
+                for lore in lore_resp.data:
+                    lore_popup = f"""
+                    <div style="font-family: sans-serif; width: 260px;">
+                        <b style="color:#d35400;">🪶 {lore['tribe_name']} Oral History</b><br>
+                        <small><b>Entity:</b> {lore['entity_name']}</small>
+                        <p style="font-size: 11px; line-height: 1.4;">{lore['full_narrative']}</p>
+                    </div>
+                    """
+                    folium.Marker(
+                        [lat + 0.01, lon + 0.01],
+                        popup=folium.Popup(lore_popup, max_width=280),
+                        icon=folium.Icon(color="orange", icon="feather", prefix="fa"),
+                        z_index_offset=1000
+                    ).add_to(marker_cluster)
 
 # ------------------------------------------
-# LAYER 3: HISTORICAL NEWSPAPERS (GREEN MAP PINS)
+# LAYER 3: HISTORICAL NEWSPAPERS (BLACK HIGH-CONTRAST PINS)
 # ------------------------------------------
-media_records = []
+local_media_records = []
 if supabase:
     try:
-        media_response = supabase.table("historical_media").select("*").execute()
-        media_records = media_response.data
+        lat_min, lat_max = lat - deg_delta, lat + deg_delta
+        lon_min, lon_max = lon - deg_delta, lon + deg_delta
+
+        media_response = (
+            supabase.table("historical_media")
+            .select("*")
+            .gte("latitude", lat_min)
+            .lte("latitude", lat_max)
+            .gte("longitude", lon_min)
+            .lte("longitude", lon_max)
+            .execute()
+        )
+        local_media_records = media_response.data
 
         if show_news:
-            for article in media_records:
+            for article in local_media_records:
                 art_lat = article.get("latitude")
                 art_lon = article.get("longitude")
 
                 if art_lat and art_lon:
                     media_popup = f"""
-                    <div style="font-family: sans-serif; width: 250px; max-height: 280px; overflow-y: auto;">
-                        <b style="color:#27ae60; font-size: 13px;">📰 {article['title']}</b><br>
-                        <small style="color:#555;"><b>Source:</b> {article['publication_name']} ({article['pub_date']})</small><br>
-                        <small style="color:#777;"><b>Location:</b> {article['county']}, {article['state_province']}</small>
-                        <hr style="margin: 6px 0; border: 0; border-top: 1px solid #eee;">
-                        <p style="font-size: 11px; line-height: 1.3; color: #2c3e50; margin: 0;">
-                            {article['full_text_transcript']}
-                        </p>
+                    <div style="font-family: sans-serif; width: 250px;">
+                        <b style="color:#000000;">📰 {article['title']}</b><br>
+                        <small><b>Source:</b> {article['publication_name']} ({article['pub_date']})</small>
+                        <hr style="margin: 4px 0;">
+                        <p style="font-size: 11px; line-height: 1.3;">{article['full_text_transcript']}</p>
                     </div>
                     """
-                    
                     folium.Marker(
                         [float(art_lat), float(art_lon)],
                         popup=folium.Popup(media_popup, max_width=270),
-                        icon=folium.Icon(color="green", icon="newspaper", prefix="fa"),
+                        icon=folium.Icon(color="black", icon="newspaper", prefix="fa"),
                         z_index_offset=900
-                    ).add_to(m)
+                    ).add_to(marker_cluster)
 
     except Exception as e:
-        st.warning(f"Error querying historical media: {e}")
+        st.warning(f"Media query error: {e}")
 
-# Render Map & Status
+# Render Map View
 st.caption(f"Loaded **{sightings_count} verified sightings** within ~{radius_miles} miles of target area.")
 st_folium(m, width="100%", height=550, returned_objects=[])
 
-# ------------------------------------------
-# 6. EXPANDABLE REGIONAL MEDIA DRAWER (BELOW MAP)
-# ------------------------------------------
-st.markdown("---")
-with st.expander("📚 View Historical Media & Press Accounts Archive", expanded=False):
-    if media_records:
-        for item in media_records:
-            st.markdown(f"### 📰 {item['title']}")
-            st.caption(f"**Publication:** {item['publication_name']} | **Date:** {item['pub_date']} | **Location:** {item['county']}, {item['state_province']}")
-            st.write(f"> {item['full_text_transcript']}")
-            st.markdown("---")
+# ==========================================
+# 6. LOWER-LEFT SOLID UI CONTROLS & OVERLAYS
+# ==========================================
+st.markdown("### 🗂️ Regional Field Context & Media Panel")
+
+col_lore_btn, col_media_btn = st.columns(2)
+
+with col_lore_btn:
+    if detected_lore:
+        with st.expander(f"🪶 Regional Oral Histories ({len(detected_lore)})", expanded=False):
+            for lore_item in detected_lore:
+                st.markdown(f"**{lore_item['tribe_name']} — {lore_item['entity_name']}**")
+                st.write(f"> {lore_item['full_narrative']}")
     else:
-        st.info("No historical media records currently in archive.")
+        st.info("No recorded regional indigenous narratives within active target boundary.")
+
+with col_media_btn:
+    if local_media_records:
+        with st.expander(f"📰 Local Press & Print Media ({len(local_media_records)})", expanded=False):
+            for media_item in local_media_records:
+                st.markdown(f"**📰 {media_item['title']}**")
+                st.caption(f"{media_item['publication_name']} | {media_item['pub_date']} | {media_item['county']}, {media_item['state_province']}")
+                st.write(f"* **Synopsis / Transcript:** {media_item['full_text_transcript']}")
+                st.markdown("---")
+    else:
+        st.info(f"No historical print accounts tagged within {radius_miles} miles.")
