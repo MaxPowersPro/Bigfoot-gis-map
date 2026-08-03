@@ -1,12 +1,11 @@
 import streamlit as st
 import folium
-from folium import Element
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
 from streamlit_js_eval import get_geolocation
-import random
 
 # ==========================================
 # 1. PAGE SETUP & WORKING TITLE
@@ -35,39 +34,15 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
-# Initialize Location State
+# Initialize Location State (Fallback to Whitehall, NY area if empty)
 if "user_lat" not in st.session_state:
-    st.session_state.user_lat = 41.7000
+    st.session_state.user_lat = 43.5556
 if "user_lon" not in st.session_state:
-    st.session_state.user_lon = -70.3000
+    st.session_state.user_lon = -73.4022
 if "location_name" not in st.session_state:
-    st.session_state.location_name = "Massachusetts Target Zone"
+    st.session_state.location_name = "Whitehall, NY Hotspot Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v9")
-
-# Helper Function: Micro-Offsetting Jitter
-def apply_jitter(lat_val, lon_val, offset_seed=0):
-    random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
-    lat_jitter = lat_val + random.uniform(-0.004, 0.004)
-    lon_jitter = lon_val + random.uniform(-0.004, 0.004)
-    return lat_jitter, lon_jitter
-
-# Helper Function: Parse Season
-def get_season(date_str):
-    if not date_str or date_str == 'N/A':
-        return 'Unknown'
-    try:
-        month = int(str(date_str).split('-')[1])
-        if month in [12, 1, 2]:
-            return '❄️ Winter'
-        elif month in [3, 4, 5]:
-            return '🌸 Spring'
-        elif month in [6, 7, 8]:
-            return '☀️ Summer'
-        elif month in [9, 10, 11]:
-            return '🍂 Autumn'
-    except Exception:
-        return 'Unknown'
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v10")
 
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
@@ -108,6 +83,7 @@ with col_input:
     loc_search = st.text_input("📍 Target Search Area", value=st.session_state.location_name)
 
 with col_radius:
+    # 50 miles defaulted for spatial context balance
     radius_miles = st.selectbox("Search Radius", [25, 50, 100, 250], index=1)
     deg_delta = radius_miles / 69.0
 
@@ -140,12 +116,12 @@ loc_name = st.session_state.location_name
 # Layer Toggles
 st.markdown("**Active Map Layers:**")
 c1, c2, c3 = st.columns(3)
-show_bfro = c1.checkbox("👣 Sightings (Solid Blue Pin)", value=True)
+show_bfro = c1.checkbox("👣 Sighting Tracks (Solid Blue Pin)", value=True)
 show_lore = c2.checkbox("🪶 Indigenous Lore (Orange Feather)", value=True)
 show_news = c3.checkbox("📰 Historic Press (Black Newspaper)", value=True)
 
 # ==========================================
-# 5. TOPOGRAPHIC MAP ENGINE
+# 5. TOPOGRAPHIC MAP ENGINE & CLUSTERING
 # ==========================================
 m = folium.Map(
     location=[lat, lon], 
@@ -154,19 +130,20 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
-# Target Center Marker (Red)
+# Enable MarkerCluster with Spiderfy so overlapping pins fan out cleanly
+marker_cluster = MarkerCluster(spiderfyOnMaxZoom=True, showCoverageOnHover=False).add_to(m)
+
+# Target Center Marker (Red Crosshairs)
 folium.Marker(
     [lat, lon],
     popup=f"<b>Target Location</b><br>{loc_name}",
     icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")
-).add_to(m)
+).add_to(marker_cluster)
 
 # ------------------------------------------
-# LAYER 1: SIGHTINGS (SOLID BLUE PINS - NO SHOES)
+# LAYER 1: SIGHTINGS (SOLID BLUE PINS - NO ICONS)
 # ------------------------------------------
 sightings_count = 0
-seasonal_breakdown = {}
-
 if show_bfro and supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
@@ -188,72 +165,62 @@ if show_bfro and supabase:
         for report in sightings:
             raw_id = str(report.get('report_id', '')).strip()
             source = report.get('source', 'BFRO')
-            event_date = report.get('event_date', 'N/A')
-
-            season = get_season(event_date)
-            seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
 
             if source == 'BFRO' and raw_id.isdigit() and len(raw_id) >= 3:
                 full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
-                link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">🔗 Full BFRO Sighting Report #{raw_id}</a>'
+                link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Direct BFRO Report #{raw_id}</a>'
             else:
                 link_html = ''
 
             popup_content = f"""
             <div style="font-family: sans-serif; width: 220px;">
                 <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
-                <small><b>Date:</b> {event_date} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
+                <small><b>Date:</b> {report.get('event_date', 'N/A')} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
                 <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
                 {link_html}
             </div>
             """
 
-            j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-
-            # Solid Blue Pin (No icon inside!)
+            # Solid Blue Pin (No info icon!)
             folium.Marker(
-                [j_lat, j_lon],
+                [report["latitude"], report["longitude"]],
                 popup=folium.Popup(popup_content, max_width=250),
-                icon=folium.Icon(color="blue", icon="info-sign"),
+                icon=folium.Icon(color="blue", icon=""),
                 z_index_offset=500
-            ).add_to(m)
+            ).add_to(marker_cluster)
 
     except Exception as e:
-        st.warning(f"Sighting query error: {e}")
+        st.warning(f"Sighting database query error: {e}")
 
 # ------------------------------------------
 # LAYER 2: SPATIAL LORE
 # ------------------------------------------
-detected_lore = []
 search_point = Point(lon, lat)
 
 if supabase:
     for tribe_name, polygon in TRIBAL_BOUNDARIES.items():
         if polygon.contains(search_point):
             lore_resp = supabase.table("tribal_lore").select("*").eq("tribe_name", tribe_name).execute()
-            if lore_resp.data:
-                detected_lore.extend(lore_resp.data)
-
+            
             if show_lore:
                 for lore in lore_resp.data:
                     lore_popup = f"""
-                    <div style="font-family: sans-serif; width: 260px;">
+                    <div style="font-family: sans-serif; width: 260px; max-height: 280px; overflow-y: auto;">
                         <b style="color:#d35400;">🪶 {lore['tribe_name']} Oral History</b><br>
                         <small><b>Entity:</b> {lore['entity_name']}</small>
                         <p style="font-size: 11px; line-height: 1.4;">{lore['full_narrative']}</p>
                     </div>
                     """
                     folium.Marker(
-                        [lat + 0.008, lon + 0.008],
+                        [lat, lon],
                         popup=folium.Popup(lore_popup, max_width=280),
                         icon=folium.Icon(color="orange", icon="feather", prefix="fa"),
                         z_index_offset=1000
-                    ).add_to(m)
+                    ).add_to(marker_cluster)
 
 # ------------------------------------------
-# LAYER 3: HISTORICAL NEWSPAPERS WITH DIRECT SOURCE LINKS
+# LAYER 3: HISTORICAL NEWSPAPERS WITH DIRECT LINKS
 # ------------------------------------------
-local_media_records = []
 if supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
@@ -277,13 +244,13 @@ if supabase:
                 img_link = article.get("image_url")
 
                 if img_link:
-                    link_btn = f'<br><a href="{img_link}" target="_blank" style="display:inline-block; margin-top:4px; font-size:11px; color:#27ae60; font-weight:bold;">🔗 View Original Article Image / Record</a>'
+                    link_btn = f'<br><a href="{img_link}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#27ae60; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">🔗 View Original Article Image / Record</a>'
                 else:
                     link_btn = ''
 
                 if art_lat and art_lon:
                     media_popup = f"""
-                    <div style="font-family: sans-serif; width: 250px;">
+                    <div style="font-family: sans-serif; width: 250px; max-height: 280px; overflow-y: auto;">
                         <b style="color:#000000;">📰 {article['title']}</b><br>
                         <small><b>Source:</b> {article['publication_name']} ({article['pub_date']})</small>
                         <hr style="margin: 4px 0;">
@@ -291,57 +258,16 @@ if supabase:
                         {link_btn}
                     </div>
                     """
-                    
-                    j_lat, j_lon = apply_jitter(float(art_lat), float(art_lon), offset_seed=2)
-
                     folium.Marker(
-                        [j_lat, j_lon],
+                        [float(art_lat), float(art_lon)],
                         popup=folium.Popup(media_popup, max_width=270),
                         icon=folium.Icon(color="black", icon="newspaper", prefix="fa"),
                         z_index_offset=900
-                    ).add_to(m)
+                    ).add_to(marker_cluster)
 
     except Exception as e:
-        st.warning(f"Media query error: {e}")
+        st.warning(f"Error querying local historical media: {e}")
 
 # Render Map View
 st.caption(f"Loaded **{sightings_count} verified sightings** within ~{radius_miles} miles of target area.")
 st_folium(m, width="100%", height=550, returned_objects=[])
-
-# ==========================================
-# 6. REGIONAL FIELD CONTEXT BELOW MAP
-# ==========================================
-st.markdown("---")
-st.markdown("### 🗂️ Regional Field Context & Intelligence Panel")
-
-col_lore_btn, col_media_btn, col_season_btn = st.columns(3)
-
-with col_lore_btn:
-    if detected_lore:
-        with st.expander(f"🪶 Regional Oral Histories ({len(detected_lore)})", expanded=False):
-            for lore_item in detected_lore:
-                st.markdown(f"**{lore_item['tribe_name']} — {lore_item['entity_name']}**")
-                st.write(f"> {lore_item['full_narrative']}")
-    else:
-        st.info("No recorded regional indigenous narratives within active target boundary.")
-
-with col_media_btn:
-    if local_media_records:
-        with st.expander(f"📰 Local Press & Archives ({len(local_media_records)})", expanded=False):
-            for media_item in local_media_records:
-                st.markdown(f"**📰 {media_item['title']}**")
-                st.caption(f"{media_item['publication_name']} | {media_item['pub_date']} | {media_item['county']}, {media_item['state_province']}")
-                st.write(f"* **Transcript:** {media_item['full_text_transcript']}")
-                if media_item.get('image_url'):
-                    st.markdown(f"[🔗 View Original Article Image / Record]({media_item['image_url']})")
-                st.markdown("---")
-    else:
-        st.info(f"No historical press accounts tagged within {radius_miles} miles.")
-
-with col_season_btn:
-    with st.expander("🍂 Seasonal Activity Breakdown", expanded=False):
-        if seasonal_breakdown:
-            for season_name, count in seasonal_breakdown.items():
-                st.markdown(f"**{season_name}:** {count} reports")
-        else:
-            st.info("No dated sighting activity in this active search area.")
