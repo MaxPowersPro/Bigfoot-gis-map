@@ -6,6 +6,8 @@ from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
 from streamlit_js_eval import get_geolocation
 import random
+import xml.etree.ElementTree as ET
+from datetime import datetime
 
 # ==========================================
 # 1. PAGE SETUP & WORKING TITLE
@@ -42,7 +44,7 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v13")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v14")
 
 # Helper Function: Micro-Offsetting Jitter
 def apply_jitter(lat_val, lon_val, offset_seed=0):
@@ -67,6 +69,38 @@ def get_season(date_str):
             return '🍂 Autumn'
     except Exception:
         return 'Unknown'
+
+# Helper Function: Generate GPX XML Package
+def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio):
+    gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
+    
+    # Target Center Waypoint
+    wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
+    ET.SubElement(wpt_target, "name").text = f"TARGET: {loc_title}"
+    ET.SubElement(wpt_target, "sym").text = "Cross-Hair"
+    
+    # Sightings Waypoints
+    for s in sightings:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(s.get("latitude")), lon=str(s.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Sighting: {s.get('title', 'BFRO Report')}"
+        ET.SubElement(wpt, "desc").text = f"Date: {s.get('event_date', 'N/A')} | Summary: {s.get('summary', '')}"
+        ET.SubElement(wpt, "sym").text = "Footprint"
+
+    # Campsites Waypoints
+    for c in camps:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(c.get("latitude")), lon=str(c.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Camp: {c.get('name', 'Campsite')}"
+        ET.SubElement(wpt, "desc").text = c.get('description', '')
+        ET.SubElement(wpt, "sym").text = "Campground"
+
+    # Audio Waypoints
+    for a in audio:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(a.get("latitude")), lon=str(a.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Audio: {a.get('event_type', 'Infrasound Log')}"
+        ET.SubElement(wpt, "desc").text = a.get('notes', '')
+        ET.SubElement(wpt, "sym").text = "Sound"
+
+    return ET.tostring(gpx, encoding="utf-8", method="xml")
 
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
@@ -107,8 +141,6 @@ with st.sidebar:
     loc_search = st.text_input("📍 Target Search Area", value=st.session_state.location_name)
     radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250], index=1)
     deg_delta = radius_miles / 69.0
-    
-    # 100-Mile Delta for Regional Press Net
     regional_deg_delta = 100.0 / 69.0
 
     if st.button("🔎 Search Area", use_container_width=True):
@@ -142,8 +174,13 @@ lat = st.session_state.user_lat
 lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
 
+# High-Visibility Main Screen Controls Bar
+col_nav1, col_nav2 = st.columns([1, 3])
+with col_nav1:
+    st.info("💡 **Tip:** Tap `<<` or `⚙️` at top-left for Search & Layer Controls.")
+
 # ==========================================
-# 5. DATA RETRIEVAL (REGIONAL & FIELD)
+# 5. DATA RETRIEVAL & DEDUPLICATION
 # ==========================================
 # 1. Sightings
 sightings_data = []
@@ -190,15 +227,21 @@ if show_news and supabase:
     except Exception:
         pass
 
-# 5. Regional Lore
+# 5. Regional Lore (Strict Deduplication Engine)
 detected_lore = []
+seen_lore_ids = set()
 search_point = Point(lon, lat)
+
 if supabase and show_lore:
     for tribe_name, polygon in TRIBAL_BOUNDARIES.items():
         if polygon.contains(search_point):
             lore_resp = supabase.table("tribal_lore").select("*").eq("tribe_name", tribe_name).execute()
             if lore_resp.data:
-                detected_lore.extend(lore_resp.data)
+                for lore_item in lore_resp.data:
+                    lore_id = lore_item.get("id") or lore_item.get("entity_name")
+                    if lore_id not in seen_lore_ids:
+                        seen_lore_ids.add(lore_id)
+                        detected_lore.append(lore_item)
 
 # ==========================================
 # 6. TOPOGRAPHIC MAP ENGINE
@@ -210,7 +253,7 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
-# 50-Mile Field Search Boundary
+# 50-Mile Field Boundary
 folium.Circle(
     radius=radius_miles * 1609.34,
     location=[lat, lon],
@@ -222,7 +265,7 @@ folium.Circle(
     popup=f"Field Radius ({radius_miles} Miles)"
 ).add_to(m)
 
-# 100-Mile Regional Intelligence Boundary (Dashed Ring)
+# 100-Mile Regional Boundary (Dashed Ring)
 folium.Circle(
     radius=100 * 1609.34,
     location=[lat, lon],
@@ -252,9 +295,7 @@ folium.Marker(
     z_index_offset=3000
 ).add_to(m)
 
-# ------------------------------------------
 # MAP LAYER 1: SIGHTINGS (SOLID BLUE DOTS)
-# ------------------------------------------
 for report in sightings_data:
     raw_id = str(report.get('report_id', '')).strip()
     source = report.get('source', 'BFRO')
@@ -298,9 +339,7 @@ for report in sightings_data:
         z_index_offset=500
     ).add_to(m)
 
-# ------------------------------------------
-# MAP LAYER 2: CAMPSITES (GREEN TENT PINS)
-# ------------------------------------------
+# MAP LAYER 2: CAMPSITES
 for camp in camps_data:
     camp_popup = f"""
     <div style="font-family: sans-serif; width: 210px;">
@@ -316,9 +355,7 @@ for camp in camps_data:
         z_index_offset=400
     ).add_to(m)
 
-# ------------------------------------------
-# MAP LAYER 3: INFRASOUND / ACOUSTIC (PURPLE MICROPHONE PINS)
-# ------------------------------------------
+# MAP LAYER 3: INFRASOUND / ACOUSTIC
 for audio in audio_data:
     audio_popup = f"""
     <div style="font-family: sans-serif; width: 220px;">
@@ -334,9 +371,7 @@ for audio in audio_data:
         z_index_offset=600
     ).add_to(m)
 
-# ------------------------------------------
-# ON-MAP REGIONAL ALERT BADGE
-# ------------------------------------------
+# ON-MAP ALERT BADGE
 total_regional_records = len(local_media_records) + len(detected_lore)
 if total_regional_records > 0:
     badge_html = f"""
@@ -359,12 +394,34 @@ if total_regional_records > 0:
     """
     m.get_root().html.add_child(folium.Element(badge_html))
 
-# Render Topographic Map
+# Render Map
 st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, and **{len(audio_data)} acoustic logs** in ~{radius_miles} miles.")
 st_folium(m, width="100%", height=520, returned_objects=[])
 
 # ==========================================
-# 7. REGIONAL FIELD CONTEXT BELOW MAP
+# 7. OFFLINE FIELD TOOLS & EXPORT ENGINE
+# ==========================================
+st.markdown("---")
+st.markdown("### 📡 Offline Field Export & Backcountry Tools")
+
+col_exp_btn, col_disclaimer = st.columns([1, 2])
+
+with col_exp_btn:
+    gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data)
+    st.download_button(
+        label="📥 Download Active Area GPX Package",
+        data=gpx_data,
+        file_name=f"bigfoot_field_zone_{int(lat)}_{int(lon)}.gpx",
+        mime="application/gpx+xml",
+        use_container_width=True
+    )
+    st.caption("Compatible with Garmin BaseCamp, Gaia GPS, OnX Offroad, and handheld GPS units.")
+
+with col_disclaimer:
+    st.warning("**Backcountry Safety Notice:** This platform serves as a secondary spatial research engine. Always carry paper topographic maps, a compass, and dedicated navigation gear when heading off-grid.")
+
+# ==========================================
+# 8. REGIONAL FIELD CONTEXT BELOW MAP
 # ==========================================
 st.markdown("<div id='regional-panel'></div>", unsafe_allow_html=True)
 st.markdown("---")
@@ -389,8 +446,12 @@ with col_media_btn:
                 st.markdown(f"#### 📰 {media_item['title']}")
                 st.caption(f"**Publication:** {media_item['publication_name']} | **Date:** {media_item['pub_date']} | **Location:** {media_item['county']}, {media_item['state_province']}")
                 st.write(f"**Transcript:** {media_item['full_text_transcript']}")
-                if media_item.get('image_url'):
-                    st.markdown(f"[🔗 View Original Article Record / Source Image]({media_item['image_url']})")
+                
+                # Link Fallback Check
+                img_url = media_item.get('image_url')
+                if img_url and str(img_url).startswith("http"):
+                    st.markdown(f"[🔗 View Original Article Record / Source Image]({img_url})")
+                
                 st.markdown("---")
     else:
         st.info("No historical press accounts tagged within 100 miles.")
