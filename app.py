@@ -42,9 +42,9 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v11")
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v12")
 
-# Helper Function: Micro-Offsetting Jitter for overlapping sighting pins
+# Helper Function: Micro-Offsetting Jitter
 def apply_jitter(lat_val, lon_val, offset_seed=0):
     random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
     lat_jitter = lat_val + random.uniform(-0.003, 0.003)
@@ -121,7 +121,7 @@ with col_btn:
                     st.session_state.user_lon = location.longitude
                     st.session_state.location_name = location.address
             except Exception:
-                st.error("Geocoding service busy. Please try again.")
+                st.error("Geocoding service busy. Please try again in a moment.")
 
 # Mobile GPS Auto-Location Button
 if st.button("📲 Use My Current Device GPS"):
@@ -136,12 +136,14 @@ lat = st.session_state.user_lat
 lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
 
-# Layer Toggles
+# Active Layer Toggles
 st.markdown("**Active Map Layers:**")
-c1, c2, c3 = st.columns(3)
-show_bfro = c1.checkbox("👣 Sightings (Solid Blue Pin)", value=True)
-show_lore = c2.checkbox("🪶 Indigenous Lore (Orange Feather)", value=True)
-show_news = c3.checkbox("📰 Historic Press (Black Newspaper)", value=True)
+c1, c2, c3, c4, c5 = st.columns(5)
+show_bfro = c1.checkbox("👣 Sightings (Blue)", value=True)
+show_camps = c2.checkbox("🏕️ Campsites (Green)", value=True)
+show_audio = c3.checkbox("🔊 Infrasound (Purple)", value=True)
+show_lore = c4.checkbox("🪶 Lore (Orange)", value=True)
+show_news = c5.checkbox("📰 Press (Black)", value=True)
 
 # ==========================================
 # 5. TOPOGRAPHIC MAP ENGINE
@@ -161,7 +163,7 @@ folium.Marker(
 ).add_to(m)
 
 # ------------------------------------------
-# LAYER 1: SIGHTINGS (SOLID BLUE PINS ON TERRAIN)
+# LAYER 1: SIGHTINGS (SOLID BLUE PINS)
 # ------------------------------------------
 sightings_count = 0
 seasonal_breakdown = {}
@@ -209,7 +211,6 @@ if show_bfro and supabase:
 
             j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
 
-            # Solid Blue Marker (No icons inside)
             folium.Marker(
                 [j_lat, j_lon],
                 popup=folium.Popup(popup_content, max_width=250),
@@ -221,16 +222,81 @@ if show_bfro and supabase:
         st.warning(f"Sighting query error: {e}")
 
 # ------------------------------------------
-# LAYERS 2 & 3: REGIONAL DOCKING ENGINE (RIGHT-EDGE VERTICAL LINE)
+# LAYER 2: PUBLIC CAMPSITES & FIELD BASECAMPS (GREEN TENTS)
 # ------------------------------------------
-# Right boundary line longitude
+if show_camps and supabase:
+    try:
+        lat_min, lat_max = lat - deg_delta, lat + deg_delta
+        lon_min, lon_max = lon - deg_delta, lon + deg_delta
+
+        camp_resp = (
+            supabase.table("campsites")
+            .select("*")
+            .gte("latitude", lat_min)
+            .lte("latitude", lat_max)
+            .gte("longitude", lon_min)
+            .lte("longitude", lon_max)
+            .execute()
+        )
+        for camp in camp_resp.data:
+            camp_popup = f"""
+            <div style="font-family: sans-serif; width: 210px;">
+                <b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br>
+                <small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br>
+                <p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p>
+            </div>
+            """
+            folium.Marker(
+                [camp["latitude"], camp["longitude"]],
+                popup=folium.Popup(camp_popup, max_width=230),
+                icon=folium.Icon(color="green", icon="campground", prefix="fa"),
+                z_index_offset=400
+            ).add_to(m)
+    except Exception:
+        pass  # Failsafe if campsites table is undergoing updates
+
+# ------------------------------------------
+# LAYER 3: INFRASOUND & ACOUSTIC LOGS (PURPLE MICROPHONES)
+# ------------------------------------------
+if show_audio and supabase:
+    try:
+        lat_min, lat_max = lat - deg_delta, lat + deg_delta
+        lon_min, lon_max = lon - deg_delta, lon + deg_delta
+
+        audio_resp = (
+            supabase.table("acoustic_reports")
+            .select("*")
+            .gte("latitude", lat_min)
+            .lte("latitude", lat_max)
+            .gte("longitude", lon_min)
+            .lte("longitude", lon_max)
+            .execute()
+        )
+        for audio in audio_resp.data:
+            audio_popup = f"""
+            <div style="font-family: sans-serif; width: 220px;">
+                <b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br>
+                <small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br>
+                <p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p>
+            </div>
+            """
+            folium.Marker(
+                [audio["latitude"], audio["longitude"]],
+                popup=folium.Popup(audio_popup, max_width=240),
+                icon=folium.Icon(color="purple", icon="microphone", prefix="fa"),
+                z_index_offset=600
+            ).add_to(m)
+    except Exception:
+        pass  # Failsafe if acoustic table is undergoing updates
+
+# ------------------------------------------
+# LAYERS 4 & 5: REGIONAL DOCKING ENGINE (RIGHT-EDGE COLUMN)
+# ------------------------------------------
 right_dock_lon = lon + (deg_delta * 0.48)
-# Starting latitude (top of the map)
 current_dock_lat = lat + (deg_delta * 0.42)
-# Spacing interval between docked pins
 dock_spacing = deg_delta * 0.12
 
-# 1. Dock Regional Press (Black Pins)
+# Dock Historical Press (Black Pins)
 local_media_records = []
 if supabase and show_news:
     try:
@@ -251,7 +317,7 @@ if supabase and show_news:
         for article in local_media_records:
             img_link = article.get("image_url")
             if img_link:
-                link_btn = f'<br><a href="{img_link}" target="_blank" style="display:inline-block; margin-top:4px; font-size:11px; color:#27ae60; font-weight:bold;">🔗 View Original Article Image / Record</a>'
+                link_btn = f'<br><a href="{img_link}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#27ae60; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">🔗 View Original Article Record</a>'
             else:
                 link_btn = ''
 
@@ -265,7 +331,6 @@ if supabase and show_news:
             </div>
             """
             
-            # Drop pin in the clean right-side vertical column
             folium.Marker(
                 [current_dock_lat, right_dock_lon],
                 popup=folium.Popup(media_popup, max_width=270),
@@ -273,13 +338,12 @@ if supabase and show_news:
                 z_index_offset=900
             ).add_to(m)
 
-            # Move next dock position down
             current_dock_lat -= dock_spacing
 
     except Exception as e:
         st.warning(f"Media query error: {e}")
 
-# 2. Dock Regional Indigenous Lore (Orange Pins)
+# Dock Indigenous Lore (Orange Pins)
 detected_lore = []
 search_point = Point(lon, lat)
 
@@ -299,7 +363,6 @@ if supabase:
                         <p style="font-size: 11px; line-height: 1.4;">{lore['full_narrative']}</p>
                     </div>
                     """
-                    # Drop pin directly below press pins in the right-side vertical column
                     folium.Marker(
                         [current_dock_lat, right_dock_lon],
                         popup=folium.Popup(lore_popup, max_width=280),
