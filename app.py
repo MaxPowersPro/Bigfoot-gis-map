@@ -437,20 +437,36 @@ st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} cam
 st_folium(m, width="100%", height=520, returned_objects=[])
 
 # ==========================================
-# 7. INVESTIGATOR FIELD LOG FORM (FACTS VS CONJECTURE)
+# 7. INVESTIGATOR FIELD LOG FORM (UN-LED NEUTRAL ENGINE)
 # ==========================================
 st.markdown("---")
-with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
+with st.expander("📝 Submit Investigator Field Log (Objective Data Engine)", expanded=False):
     st.caption("Log field observations directly to your private account or contribute unvetted data to the community layer.")
     
     with st.form("investigator_log_form", clear_on_submit=True):
         st.subheader("1. Privacy & Storage Settings")
-        visibility = st.radio("Log Storage Mode:", ["🔒 Private Vault (Only Me)", "🌐 Public Community Layer (Unvetted)"], horizontal=True)
+        visibility = st.radio(
+            "Log Storage Mode:", 
+            ["🔒 Private Vault (Only Me)", "🌐 Public Community Layer (Unvetted)"], 
+            horizontal=True
+        )
         is_public = True if "Public" in visibility else False
 
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
-            obs_type = st.selectbox("Observation Type", ["Footprint / Trackway", "Vocalization / Audio", "Visual Encounter", "Tree Structure / Break", "Infrasound Anomaly", "Other Field Evidence"])
+            # Scientifically Neutral, Non-Leading Evidence Classifications
+            obs_type = st.selectbox(
+                "Nature of Physical Evidence", 
+                [
+                    "Suspect Impression",
+                    "Potential Nesting / Matting Site",
+                    "Vegetation Disturbance / Fractured Foliage",
+                    "Acoustic Event / Audio Record",
+                    "Visual Observation",
+                    "Unidentified Biological Trace",
+                    "Unusual Environmental Anomaly"
+                ]
+            )
         with col_f2:
             obs_date = st.date_input("Observation Date", value=datetime.now())
         with col_f3:
@@ -462,25 +478,42 @@ with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)
         st.subheader("2. Hard Field Data (Objective Facts)")
         col_facts1, col_facts2 = st.columns(2)
         with col_facts1:
-            weather_temp = st.text_input("Weather / Temperature / Elevation Notes", placeholder="e.g. 54°F, Clear, High Humid, 1,200ft elevation")
+            weather_temp = st.text_input(
+                "Environmental Baseline & Elevation", 
+                placeholder="e.g. 54°F, Clear, High Humidity, 1,200ft elevation"
+            )
         with col_facts2:
-            habitat_type = st.text_input("Habitat & Canopy Type", placeholder="e.g. Dense Pine Ridge near river drainage")
+            habitat_type = st.text_input(
+                "Habitat & Terrain Type", 
+                placeholder="e.g. Dense Pine Ridge near river drainage"
+            )
         
-        physical_notes = st.text_area("Physical Evidence Measurements & Hard Facts", placeholder="Include exact measurements: track length, depth, stride distance, audio frequency, camera specs, or physical trail conditions.")
+        physical_notes = st.text_area(
+            "Exactly what did you find? (Hard Physical Facts Only)", 
+            placeholder="Describe physical reality without assumptions: exact measurements (length, depth, stride), scale markers used, lighting conditions, or trail surface."
+        )
 
         st.markdown("---")
-        st.subheader("3. Field Interpretation (Subjective Conjecture)")
+        st.subheader("3. Observer Conjecture & Hypothesis")
         col_conj1, col_conj2 = st.columns(2)
         with col_conj1:
-            size_stride = st.text_input("Estimated Subject Size / Speed / Stride", placeholder="e.g. Estimated 7-8ft tall, heavy gait")
+            size_stride = st.text_input(
+                "Estimated Dimensions / Stride / Gait", 
+                placeholder="e.g. Estimated stride 44 inches, deep ground depression"
+            )
         with col_conj2:
-            st.caption("Keep subjective impressions separate from hard data.")
+            st.caption("Keep subjective impressions and personal hypotheses strictly separate from hard measurements.")
         
-        field_narrative = st.text_area("Field Narrative & Impressions", placeholder="Describe context, gut feelings, potential intent, or background events surrounding the observation.")
+        field_narrative = st.text_area(
+            "Field Narrative & Personal Interpretation", 
+            placeholder="What do you personally hypothesize caused or created this? Describe context, sequence of events, or subjective impressions."
+        )
 
         st.markdown("---")
         st.subheader("4. Code of Ethics & Agreement")
-        ethics_agree = st.checkbox("I agree to abide by the Field Research Code of Ethics (zero trespassing, non-harassment of wildlife, and honest data submission). I understand public submissions render as unvetted community logs.")
+        ethics_agree = st.checkbox(
+            "I certify this is an honest field record and agree to abide by the Field Code of Ethics (zero trespassing, non-harassment of wildlife, and objective reporting)."
+        )
 
         submit_btn = st.form_submit_button("💾 Save Investigator Field Log", use_container_width=True)
 
