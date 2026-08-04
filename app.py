@@ -146,7 +146,7 @@ show_lore = c4.checkbox("🪶 Lore (Orange)", value=True)
 show_news = c5.checkbox("📰 Press (Black)", value=True)
 
 # ==========================================
-# 5. TOPOGRAPHIC MAP ENGINE
+# 5. TOPOGRAPHIC MAP ENGINE WITH GROUNDING BEACON
 # ==========================================
 m = folium.Map(
     location=[lat, lon], 
@@ -154,6 +154,38 @@ m = folium.Map(
     tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
     attr="OpenTopoMap"
 )
+
+# 1. 50-Mile Radius Visual Boundary (Grounds the search zone)
+folium.Circle(
+    radius=radius_miles * 1609.34,  # Convert miles to meters
+    location=[lat, lon],
+    color="#e74c3c",
+    weight=2,
+    fill=True,
+    fill_color="#e74c3c",
+    fill_opacity=0.08,
+    popup=f"Active Search Radius ({radius_miles} Miles)"
+).add_to(m)
+
+# 2. Outer Center Beacon Halo (Makes target visible at high zoom)
+folium.CircleMarker(
+    location=[lat, lon],
+    radius=18,
+    color="#ff0000",
+    weight=3,
+    fill=True,
+    fill_color="#ff4d4d",
+    fill_opacity=0.6,
+    popup=f"<b>TARGET CENTER HALO</b><br>{loc_name}"
+).add_to(m)
+
+# 3. High-Contrast Red Center Crosshair (Stays on top)
+folium.Marker(
+    [lat, lon],
+    popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}",
+    icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+    z_index_offset=2000  # Ensures target pin ALWAYS sits on top of all other layers
+).add_to(m)
 
 # Target Center Marker (Red Crosshairs)
 folium.Marker(
