@@ -44,7 +44,24 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v15")
+# Updated Geocoder with higher timeout
+geolocator = Nominatim(user_agent="bigfoot_field_platform_v16", timeout=10)
+
+if st.button("🔎 Search Area", use_container_width=True):
+    if loc_search:
+        try:
+            # Explicit timeout added to prevent generic 'service busy' drops
+            location = geolocator.geocode(loc_search, timeout=10)
+            if location:
+                st.session_state.user_lat = location.latitude
+                st.session_state.user_lon = location.longitude
+                st.session_state.location_name = location.address
+                st.success(f"Target set to: {location.address}")
+                st.rerun()
+            else:
+                st.warning("Location not found. Try entering 'City, State' or a ZIP code.")
+        except Exception as e:
+            st.error("Geocoding network timeout. Please press search again.")
 
 # Helper Function: Micro-Offsetting Jitter
 def apply_jitter(lat_val, lon_val, offset_seed=0):
