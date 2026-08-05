@@ -274,7 +274,33 @@ if supabase and show_lore:
                     if lore_id not in seen_lore_ids:
                         seen_lore_ids.add(lore_id)
                         detected_lore.append(lore_item)
+# ==========================================
+# DIAGNOSTIC DEBUG PANEL (TEMPORARY TROUBLESHOOTING)
+# ==========================================
+with st.expander("🔍 System Diagnostics & Query Inspector", expanded=True):
+    col_d1, col_d2, col_d3 = st.columns(3)
+    with col_d1:
+        st.write(f"**Target Location:** {loc_name}")
+        st.write(f"**Center Lat/Lon:** `{lat:.5f}, {lon:.5f}`")
+        st.write(f"**Search Radius:** {radius_miles} miles (`deg_delta: {deg_delta:.4f}`)")
+    with col_d2:
+        st.write(f"**Latitude Range:** `{lat - deg_delta:.5f}` to `{lat + deg_delta:.5f}`")
+        st.write(f"**Longitude Range:** `{lon - deg_delta:.5f}` to `{lon + deg_delta:.5f}`")
+        st.write(f"**Supabase Client Active:** `{supabase is not None}`")
+    with col_d3:
+        st.write(f"**Sightings Fetched:** `{len(sightings_data)}`")
+        st.write(f"**Campsites Fetched:** `{len(camps_data)}`")
+        st.write(f"**Audio Logs Fetched:** `{len(audio_data)}`")
+        st.write(f"**Community Logs Fetched:** `{len(community_logs_data)}`")
 
+    # Raw Query Test Button
+    if st.button("🧪 Test Unfiltered Supabase Fetch (First 5 Rows)"):
+        if supabase:
+            try:
+                test_resp = supabase.table("sighting_reports").select("title, latitude, longitude, event_date").limit(5).execute()
+                st.write("**Sample Supabase Sighting Records:**", test_resp.data)
+            except Exception as err:
+                st.error(f"Supabase Query Error: {err}")
 # ==========================================
 # 6. TOPOGRAPHIC MAP ENGINE
 # ==========================================
