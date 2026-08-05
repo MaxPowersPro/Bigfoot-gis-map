@@ -1,13 +1,13 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
 from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
 from streamlit_js_eval import get_geolocation
 import random
 import xml.etree.ElementTree as ET
 from datetime import datetime
+import requests
 
 # ==========================================
 # 1. PAGE SETUP & WORKING TITLE
@@ -43,25 +43,6 @@ if "user_lon" not in st.session_state:
     st.session_state.user_lon = -70.3000
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
-
-# Updated Geocoder with higher timeout
-geolocator = Nominatim(user_agent="bigfoot_field_platform_v16", timeout=10)
-
-if st.button("🔎 Search Area", use_container_width=True):
-    if loc_search:
-        try:
-            # Explicit timeout added to prevent generic 'service busy' drops
-            location = geolocator.geocode(loc_search, timeout=10)
-            if location:
-                st.session_state.user_lat = location.latitude
-                st.session_state.user_lon = location.longitude
-                st.session_state.location_name = location.address
-                st.success(f"Target set to: {location.address}")
-                st.rerun()
-            else:
-                st.warning("Location not found. Try entering 'City, State' or a ZIP code.")
-        except Exception as e:
-            st.error("Geocoding network timeout. Please press search again.")
 
 # Helper Function: Micro-Offsetting Jitter
 def apply_jitter(lat_val, lon_val, offset_seed=0):
@@ -157,8 +138,30 @@ TRIBAL_BOUNDARIES = {
 }
 
 # ==========================================
-# 4. SIDEBAR CONTROLS & GEOLOCATION
+# 4. SIDEBAR CONTROLS & MAPBOX GEOLOCATION
 # ==========================================
+
+# Helper Function: Mapbox Direct Geocoder
+def geocode_mapbox(query):
+    token = st.secrets.get("MAPBOX_TOKEN")
+    if not token:
+        st.error("Mapbox token missing in Streamlit Secrets.")
+        return None
+    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{requests.utils.quote(query)}.json"
+    params = {"access_token": token, "limit": 1}
+    try:
+        resp = requests.get(url, params=params, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("features"):
+                feature = data["features"][0]
+                lon_val, lat_val = feature["center"]
+                place_name = feature.get("place_name", query)
+                return lat_val, lon_val, place_name
+    except Exception:
+        pass
+    return None
+
 with st.sidebar:
     st.header("⚙️ Field Controls")
     
@@ -167,18 +170,24 @@ with st.sidebar:
     deg_delta = radius_miles / 69.0
     regional_deg_delta = 100.0 / 69.0
 
-    if st.button("🔎 Search Area", use_container_width=True):
-        if loc_search:
-            try:
-                location = geolocator.geocode(loc_search)
-                if location:
-                    st.session_state.user_lat = location.latitude
-                    st.session_state.user_lon = location.longitude
-                    st.session_state.location_name = location.address
-            except Exception:
-                st.error("Geocoding service busy. Please try again.")
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        search_btn = st.button("🔎 Search Area", use_container_width=True)
+    with col_s2:
+        gps_btn = st.button("📲 Use Device GPS", use_container_width=True)
 
-    if st.button("📲 Use Device GPS", use_container_width=True):
+    if search_btn and loc_search:
+        res = geocode_mapbox(loc_search)
+        if res:
+            st.session_state.user_lat = res[0]
+            st.session_state.user_lon = res[1]
+            st.session_state.location_name = res[2]
+            st.success("Target updated!")
+            st.rerun()
+        else:
+            st.error("Location not found. Please check spelling or enter a ZIP code.")
+
+    if gps_btn:
         loc = get_geolocation()
         if loc and "coords" in loc:
             st.session_state.user_lat = loc["coords"]["latitude"]
@@ -471,7 +480,6 @@ with st.expander("📝 Submit Investigator Field Log (Objective Data Engine)", e
 
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
-            # Scientifically Neutral, Non-Leading Evidence Classifications
             obs_type = st.selectbox(
                 "Nature of Physical Evidence", 
                 [
