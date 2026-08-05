@@ -23,7 +23,7 @@ st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
 # ==========================================
-# 2. SUPABASE CLOUD CONNECTION
+# 2. SUPABASE CLOUD CONNECTION (WITH ERROR LOGGING)
 # ==========================================
 @st.cache_resource
 def init_supabase():
@@ -31,82 +31,11 @@ def init_supabase():
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
-    except Exception:
+    except Exception as e:
+        st.error(f"⚠️ Supabase Init Failed: {e}")
         return None
 
 supabase: Client = init_supabase()
-
-# Initialize Location State
-if "user_lat" not in st.session_state:
-    st.session_state.user_lat = 41.7000
-if "user_lon" not in st.session_state:
-    st.session_state.user_lon = -70.3000
-if "location_name" not in st.session_state:
-    st.session_state.location_name = "Massachusetts Target Zone"
-
-# Helper Function: Micro-Offsetting Jitter
-def apply_jitter(lat_val, lon_val, offset_seed=0):
-    random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
-    lat_jitter = lat_val + random.uniform(-0.003, 0.003)
-    lon_jitter = lon_val + random.uniform(-0.003, 0.003)
-    return lat_jitter, lon_jitter
-
-# Helper Function: Parse Season
-def get_season(date_str):
-    if not date_str or date_str == 'N/A':
-        return 'Unknown'
-    try:
-        month = int(str(date_str).split('-')[1])
-        if month in [12, 1, 2]:
-            return '❄️ Winter'
-        elif month in [3, 4, 5]:
-            return '🌸 Spring'
-        elif month in [6, 7, 8]:
-            return '☀️ Summer'
-        elif month in [9, 10, 11]:
-            return '🍂 Autumn'
-    except Exception:
-        return 'Unknown'
-
-# Helper Function: Generate GPX XML Package
-def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
-    gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
-    
-    # Target Center
-    wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
-    ET.SubElement(wpt_target, "name").text = f"TARGET: {loc_title}"
-    ET.SubElement(wpt_target, "sym").text = "Cross-Hair"
-    
-    # Sightings
-    for s in sightings:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(s.get("latitude")), lon=str(s.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Sighting: {s.get('title', 'BFRO Report')}"
-        ET.SubElement(wpt, "desc").text = f"Date: {s.get('event_date', 'N/A')} | Summary: {s.get('summary', '')}"
-        ET.SubElement(wpt, "sym").text = "Footprint"
-
-    # Campsites
-    for c in camps:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(c.get("latitude")), lon=str(c.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Camp: {c.get('name', 'Campsite')}"
-        ET.SubElement(wpt, "desc").text = c.get('description', '')
-        ET.SubElement(wpt, "sym").text = "Campground"
-
-    # Audio
-    for a in audio:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(a.get("latitude")), lon=str(a.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Audio: {a.get('event_type', 'Infrasound Log')}"
-        ET.SubElement(wpt, "desc").text = a.get('notes', '')
-        ET.SubElement(wpt, "sym").text = "Sound"
-
-    # Community Field Logs
-    for log in community_logs:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(log.get("latitude")), lon=str(log.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Field Log: {log.get('observation_type', 'Unvetted Log')}"
-        ET.SubElement(wpt, "desc").text = f"Facts: {log.get('physical_evidence_notes', '')} | Narrative: {log.get('field_narrative', '')}"
-        ET.SubElement(wpt, "sym").text = "Pin"
-
-    return ET.tostring(gpx, encoding="utf-8", method="xml")
-
 # ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
 # ==========================================
