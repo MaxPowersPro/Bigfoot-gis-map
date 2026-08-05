@@ -1,4 +1,8 @@
 streamlit
 streamlit-folium
 pandas
+shapely
+supabase
+streamlit-js-eval
+requests
 starlette==0.38.2
