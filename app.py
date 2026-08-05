@@ -16,7 +16,7 @@ st.set_page_config(
     page_title="Bigfoot Field Analysis Platform",
     page_icon="👣",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="auto"
 )
 
 st.title("👣 Bigfoot Field Analysis Platform")
@@ -140,8 +140,6 @@ TRIBAL_BOUNDARIES = {
 # ==========================================
 # 4. SIDEBAR CONTROLS & MAPBOX GEOLOCATION
 # ==========================================
-
-# Helper Function: Mapbox Direct Geocoder
 def geocode_mapbox(query):
     token = st.secrets.get("MAPBOX_TOKEN")
     if not token:
@@ -208,13 +206,9 @@ lat = st.session_state.user_lat
 lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
 
-# Navigation Help Header
-st.info("💡 **Tip:** Tap `<<` or `⚙️` at top-left for Search & Layer Controls.")
-
 # ==========================================
 # 5. DATA RETRIEVAL & DEDUPLICATION
 # ==========================================
-# 1. Sightings
 sightings_data = []
 seasonal_breakdown = {}
 if show_bfro and supabase:
@@ -222,55 +216,50 @@ if show_bfro and supabase:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
         resp = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        sightings_data = resp.data
+        sightings_data = resp.data or []
     except Exception:
         pass
 
-# 2. Campsites
 camps_data = []
 if show_camps and supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
         resp = supabase.table("campsites").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        camps_data = resp.data
+        camps_data = resp.data or []
     except Exception:
         pass
 
-# 3. Infrasound / Acoustic
 audio_data = []
 if show_audio and supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
         resp = supabase.table("acoustic_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        audio_data = resp.data
+        audio_data = resp.data or []
     except Exception:
         pass
 
-# 4. Public Unvetted Community Logs
 community_logs_data = []
 if show_user_logs and supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
         resp = supabase.table("investigator_logs").select("*").eq("is_public", True).gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        community_logs_data = resp.data
+        community_logs_data = resp.data or []
     except Exception:
         pass
 
-# 5. Regional Media (100-Mile Net)
 local_media_records = []
 if show_news and supabase:
     try:
         r_lat_min, r_lat_max = lat - regional_deg_delta, lat + regional_deg_delta
         r_lon_min, r_lon_max = lon - regional_deg_delta, lon + regional_deg_delta
         resp = supabase.table("historical_media").select("*").gte("latitude", r_lat_min).lte("latitude", r_lat_max).gte("longitude", r_lon_min).lte("longitude", r_lon_max).execute()
-        local_media_records = resp.data
+        local_media_records = resp.data or []
     except Exception:
         pass
 
-# 6. Regional Lore
 detected_lore = []
 seen_lore_ids = set()
 search_point = Point(lon, lat)
@@ -458,9 +447,11 @@ if total_regional_records > 0:
     """
     m.get_root().html.add_child(folium.Element(badge_html))
 
-# Render Map
+# Render Map with Dynamic Key to Force Clean Redraw
 st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
-st_folium(m, width="100%", height=520, returned_objects=[])
+
+map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
+st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
 # 7. INVESTIGATOR FIELD LOG FORM (UN-LED NEUTRAL ENGINE)
@@ -606,7 +597,6 @@ with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine (Un-Led Aco
         st.subheader("🔗 External Bioacoustic Databases")
         st.caption("Query open-access sound archives filtered to native wildlife near your current coordinates:")
         
-        # Dynamic search URLs based on active location coordinates
         macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
         xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
         
