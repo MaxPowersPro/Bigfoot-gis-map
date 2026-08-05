@@ -569,7 +569,65 @@ with st.expander("📝 Submit Investigator Field Log (Objective Data Engine)", e
                     st.error(f"Error saving log: {e}")
 
 # ==========================================
-# 8. OFFLINE FIELD TOOLS & EXPORT ENGINE
+# 8. REGIONAL FAUNA & BIOACOUSTIC REFERENCE ENGINE
+# ==========================================
+st.markdown("---")
+with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine (Un-Led Acoustic Analysis)", expanded=False):
+    st.caption("Cross-reference field audio against native regional wildlife vocal repertoires before logging anomalous acoustic events.")
+    
+    st.warning(
+        "**Field Science Note on Vocal Spectrum:** Native species possess extensive vocal ranges often mistaken for anomalous sounds. "
+        "For example, Barred Owls produce juvenile 'whoop' calls and group caterwauling that mimics primate troops, while Coyotes utilize complex yip-harmonic transitions."
+    )
+    
+    col_bio1, col_bio2 = st.columns([1, 1])
+    
+    with col_bio1:
+        st.subheader("📍 Active Target Location Bio-Profile")
+        st.write(f"**Current Search Zone:** {loc_name}")
+        st.write(f"**Coordinates:** `{lat:.4f}, {lon:.4f}`")
+        
+        st.markdown("#### Primary Regional Vocalizers to Cross-Reference")
+        st.markdown("""
+        * **Raptors & Owls:**
+          * *Barred Owl:* Full range includes 8-accented calls, juvenile beggars, throat-whoops, and chaotic group duets/caterwauling.
+          * *Great Horned Owl:* Deep territorial hoots, guttural barks, high-pitched squawks.
+          * *Eastern Screech-Owl:* Tremolo whinnies and monotonic trills.
+        * **Canids & Predators:**
+          * *Eastern Coyote:* Solitary bark-howls, group yip-harmonics (often sounding like twice the pack size), challenge barks.
+          * *Red Fox / Gray Fox:* High-pitched vixen screams, raspy alarm barks, chatter calls.
+          * *Fisher Cat / Bobcat:* Screeching caterwauls, low grunts, raspy chittering.
+        * **Ungulates & Large Mammals:**
+          * *White-Tailed Deer:* High-pressure alarm snorts/blows, wheezes, juvenile grunts.
+          * *Black Bear:* Guttural huffs, jaw-pops, woofs, and cub crying sounds.
+        """)
+
+    with col_bio2:
+        st.subheader("🔗 External Bioacoustic Databases")
+        st.caption("Query open-access sound archives filtered to native wildlife near your current coordinates:")
+        
+        # Dynamic search URLs based on active location coordinates
+        macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
+        xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
+        
+        st.markdown(f"""
+        * [🔊 **Macaulay Library (Cornell Lab of Ornithology)**]({macaulay_url})
+          *Access complete behavioral audio suites, variation recordings, and spectrograms for birds and mammals.*
+        * [🌐 **Xeno-Canto Geographic Sound Database**]({xenocanto_url})
+          *Search community-contributed wildlife sound recordings near active field coordinates.*
+        """)
+        
+        st.markdown("---")
+        st.subheader("📊 Neutral Acoustic Diagnostic Checklist")
+        st.caption("Evaluate physical audio parameters prior to assigning species or origin hypothesis:")
+        
+        st.checkbox("Acoustic Cadence: Is the sound a single burst, or does it repeat at measured intervals?")
+        st.checkbox("Harmonic Resonance: Does the sound exhibit low-frequency reverberation through terrain/canopy?")
+        st.checkbox("Vocal Repertoire Check: Have you evaluated juvenile/duet calls for local owl or canid populations?")
+        st.checkbox("Environmental Echo: Are reflections off ledges or water bodies altering pitch perception?")
+
+# ==========================================
+# 9. OFFLINE FIELD TOOLS & EXPORT ENGINE
 # ==========================================
 st.markdown("---")
 st.markdown("### 📡 Offline Field Export & Backcountry Tools")
@@ -591,7 +649,7 @@ with col_disclaimer:
     st.warning("**Backcountry Safety Notice:** This platform serves as a secondary spatial research engine. Always carry paper topographic maps, a compass, and dedicated navigation gear when heading off-grid.")
 
 # ==========================================
-# 9. REGIONAL FIELD CONTEXT BELOW MAP
+# 10. REGIONAL FIELD CONTEXT BELOW MAP
 # ==========================================
 st.markdown("<div id='regional-panel'></div>", unsafe_allow_html=True)
 st.markdown("---")
