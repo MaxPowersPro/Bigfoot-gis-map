@@ -22,13 +22,18 @@ st.set_page_config(
 st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
-# GUARANTEE SESSION STATE KEYS EXIST BEFORE SIDEBAR RENDERS
+# GUARANTEE SESSION STATE KEYS EXIST AT RUNTIME
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
 if "user_lon" not in st.session_state:
     st.session_state.user_lon = -70.3000
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
+
+# Extract core location variables globally for all sections
+lat = float(st.session_state.user_lat)
+lon = float(st.session_state.user_lon)
+loc_name = str(st.session_state.location_name)
 
 # ==========================================
 # 2. SUPABASE CLOUD CONNECTION
@@ -46,7 +51,72 @@ def init_supabase():
         st.error(f"⚠️ Supabase Init Failed: {e}")
         return None
 
-supabase: Client = init_supabase()# ==========================================
+supabase: Client = init_supabase()
+
+# Helper Function: Micro-Offsetting Jitter
+def apply_jitter(lat_val, lon_val, offset_seed=0):
+    random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
+    lat_jitter = lat_val + random.uniform(-0.003, 0.003)
+    lon_jitter = lon_val + random.uniform(-0.003, 0.003)
+    return lat_jitter, lon_jitter
+
+# Helper Function: Parse Season
+def get_season(date_str):
+    if not date_str or date_str == 'N/A':
+        return 'Unknown'
+    try:
+        month = int(str(date_str).split('-')[1])
+        if month in [12, 1, 2]:
+            return '❄️ Winter'
+        elif month in [3, 4, 5]:
+            return '🌸 Spring'
+        elif month in [6, 7, 8]:
+            return '☀️ Summer'
+        elif month in [9, 10, 11]:
+            return '🍂 Autumn'
+    except Exception:
+        return 'Unknown'
+
+# Helper Function: Generate GPX XML Package
+def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
+    gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
+    
+    # Target Center
+    wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
+    ET.SubElement(wpt_target, "name").text = f"TARGET: {loc_title}"
+    ET.SubElement(wpt_target, "sym").text = "Cross-Hair"
+    
+    # Sightings
+    for s in sightings:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(s.get("latitude")), lon=str(s.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Sighting: {s.get('title', 'BFRO Report')}"
+        ET.SubElement(wpt, "desc").text = f"Date: {s.get('event_date', 'N/A')} | Summary: {s.get('summary', '')}"
+        ET.SubElement(wpt, "sym").text = "Footprint"
+
+    # Campsites
+    for c in camps:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(c.get("latitude")), lon=str(c.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Camp: {c.get('name', 'Campsite')}"
+        ET.SubElement(wpt, "desc").text = c.get('description', '')
+        ET.SubElement(wpt, "sym").text = "Campground"
+
+    # Audio
+    for a in audio:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(a.get("latitude")), lon=str(a.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Audio: {a.get('event_type', 'Infrasound Log')}"
+        ET.SubElement(wpt, "desc").text = a.get('notes', '')
+        ET.SubElement(wpt, "sym").text = "Sound"
+
+    # Community Field Logs
+    for log in community_logs:
+        wpt = ET.SubElement(gpx, "wpt", lat=str(log.get("latitude")), lon=str(log.get("longitude")))
+        ET.SubElement(wpt, "name").text = f"Field Log: {log.get('observation_type', 'Unvetted Log')}"
+        ET.SubElement(wpt, "desc").text = f"Facts: {log.get('physical_evidence_notes', '')} | Narrative: {log.get('field_narrative', '')}"
+        ET.SubElement(wpt, "sym").text = "Pin"
+
+    return ET.tostring(gpx, encoding="utf-8", method="xml")
+
+# ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
 # ==========================================
 TRIBAL_BOUNDARIES = {
@@ -102,7 +172,7 @@ def geocode_mapbox(query):
 with st.sidebar:
     st.header("⚙️ Field Controls")
     
-    loc_search = st.text_input("📍 Target Search Area", value=st.session_state.location_name)
+    loc_search = st.text_input("📍 Target Search Area", value=loc_name)
     radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250], index=1)
     deg_delta = radius_miles / 69.0
     regional_deg_delta = 100.0 / 69.0
@@ -125,10 +195,10 @@ with st.sidebar:
             st.error("Location not found. Please check spelling or enter a ZIP code.")
 
     if gps_btn:
-        loc = get_geolocation()
-        if loc and "coords" in loc:
-            st.session_state.user_lat = loc["coords"]["latitude"]
-            st.session_state.user_lon = loc["coords"]["longitude"]
+        loc_data = get_geolocation()
+        if loc_data and "coords" in loc_data:
+            st.session_state.user_lat = loc_data["coords"]["latitude"]
+            st.session_state.user_lon = loc_data["coords"]["longitude"]
             st.session_state.location_name = f"Current GPS ({st.session_state.user_lat:.4f}, {st.session_state.user_lon:.4f})"
             st.rerun()
 
@@ -141,13 +211,11 @@ with st.sidebar:
     show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
     show_news = st.checkbox("📰 Regional Press Net", value=True)
 
-lat = st.session_state.user_lat
-lon = st.session_state.user_lon
-loc_name = st.session_state.location_name
-# Ensure lat, lon, and loc_name are cleanly extracted from session state
-lat = st.session_state.get("user_lat", 41.7000)
-lon = st.session_state.get("user_lon", -70.3000)
-loc_name = st.session_state.get("location_name", "Target Area")
+# Re-update global variables after potential sidebar interactions
+lat = float(st.session_state.user_lat)
+lon = float(st.session_state.user_lon)
+loc_name = str(st.session_state.location_name)
+
 # ==========================================
 # 5. DATA RETRIEVAL & DEDUPLICATION
 # ==========================================
@@ -216,33 +284,7 @@ if supabase and show_lore:
                     if lore_id not in seen_lore_ids:
                         seen_lore_ids.add(lore_id)
                         detected_lore.append(lore_item)
-# ==========================================
-# DIAGNOSTIC DEBUG PANEL (TEMPORARY TROUBLESHOOTING)
-# ==========================================
-with st.expander("🔍 System Diagnostics & Query Inspector", expanded=True):
-    col_d1, col_d2, col_d3 = st.columns(3)
-    with col_d1:
-        st.write(f"**Target Location:** {loc_name}")
-        st.write(f"**Center Lat/Lon:** `{lat:.5f}, {lon:.5f}`")
-        st.write(f"**Search Radius:** {radius_miles} miles (`deg_delta: {deg_delta:.4f}`)")
-    with col_d2:
-        st.write(f"**Latitude Range:** `{lat - deg_delta:.5f}` to `{lat + deg_delta:.5f}`")
-        st.write(f"**Longitude Range:** `{lon - deg_delta:.5f}` to `{lon + deg_delta:.5f}`")
-        st.write(f"**Supabase Client Active:** `{supabase is not None}`")
-    with col_d3:
-        st.write(f"**Sightings Fetched:** `{len(sightings_data)}`")
-        st.write(f"**Campsites Fetched:** `{len(camps_data)}`")
-        st.write(f"**Audio Logs Fetched:** `{len(audio_data)}`")
-        st.write(f"**Community Logs Fetched:** `{len(community_logs_data)}`")
 
-    # Raw Query Test Button
-    if st.button("🧪 Test Unfiltered Supabase Fetch (First 5 Rows)"):
-        if supabase:
-            try:
-                test_resp = supabase.table("sighting_reports").select("title, latitude, longitude, event_date").limit(5).execute()
-                st.write("**Sample Supabase Sighting Records:**", test_resp.data)
-            except Exception as err:
-                st.error(f"Supabase Query Error: {err}")
 # ==========================================
 # 6. TOPOGRAPHIC MAP ENGINE
 # ==========================================
@@ -415,7 +457,7 @@ if total_regional_records > 0:
     """
     m.get_root().html.add_child(folium.Element(badge_html))
 
-# Render Map with Dynamic Key to Force Clean Redraw
+# Render Map
 st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
 
 map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
@@ -593,7 +635,15 @@ st.markdown("### 📡 Offline Field Export & Backcountry Tools")
 col_exp_btn, col_disclaimer = st.columns([1, 2])
 
 with col_exp_btn:
-    gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, community_logs_data)
+    gpx_data = generate_gpx(
+        lat, 
+        lon, 
+        loc_name, 
+        sightings_data if 'sightings_data' in locals() else [], 
+        camps_data if 'camps_data' in locals() else [], 
+        audio_data if 'audio_data' in locals() else [], 
+        community_logs_data if 'community_logs_data' in locals() else []
+    )
     st.download_button(
         label="📥 Download Active Area GPX Package",
         data=gpx_data,
