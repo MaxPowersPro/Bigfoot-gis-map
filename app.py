@@ -144,7 +144,10 @@ with st.sidebar:
 lat = st.session_state.user_lat
 lon = st.session_state.user_lon
 loc_name = st.session_state.location_name
-
+# Ensure lat, lon, and loc_name are cleanly extracted from session state
+lat = st.session_state.get("user_lat", 41.7000)
+lon = st.session_state.get("user_lon", -70.3000)
+loc_name = st.session_state.get("location_name", "Target Area")
 # ==========================================
 # 5. DATA RETRIEVAL & DEDUPLICATION
 # ==========================================
