@@ -10,33 +10,43 @@ from datetime import datetime
 import requests
 
 # ==========================================
-# 1. PAGE SETUP & WORKING TITLE
+# 1. PAGE SETUP & SESSION STATE INIT
 # ==========================================
 st.set_page_config(
     page_title="Bigfoot Field Analysis Platform",
     page_icon="👣",
     layout="wide",
-    initial_sidebar_state="auto"
+    initial_sidebar_state="expanded"
 )
 
 st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
+# GUARANTEE SESSION STATE KEYS EXIST BEFORE SIDEBAR RENDERS
+if "user_lat" not in st.session_state:
+    st.session_state.user_lat = 41.7000
+if "user_lon" not in st.session_state:
+    st.session_state.user_lon = -70.3000
+if "location_name" not in st.session_state:
+    st.session_state.location_name = "Massachusetts Target Zone"
+
 # ==========================================
-# 2. SUPABASE CLOUD CONNECTION (WITH ERROR LOGGING)
+# 2. SUPABASE CLOUD CONNECTION
 # ==========================================
 @st.cache_resource
 def init_supabase():
     try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
+        url = st.secrets.get("SUPABASE_URL")
+        key = st.secrets.get("SUPABASE_KEY")
+        if not url or not key:
+            st.warning("⚠️ Supabase credentials missing in Streamlit Cloud Secrets.")
+            return None
         return create_client(url, key)
     except Exception as e:
         st.error(f"⚠️ Supabase Init Failed: {e}")
         return None
 
-supabase: Client = init_supabase()
-# ==========================================
+supabase: Client = init_supabase()# ==========================================
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
 # ==========================================
 TRIBAL_BOUNDARIES = {
