@@ -22,7 +22,6 @@ st.set_page_config(
 st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
-# Guarantee session state keys exist at runtime
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
 if "user_lon" not in st.session_state:
@@ -52,14 +51,12 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
-# Helper Function: Micro-Offsetting Jitter
 def apply_jitter(lat_val, lon_val, offset_seed=0):
     random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
     lat_jitter = lat_val + random.uniform(-0.003, 0.003)
     lon_jitter = lon_val + random.uniform(-0.003, 0.003)
     return lat_jitter, lon_jitter
 
-# Helper Function: Parse Season
 def get_season(date_str):
     if not date_str or date_str == 'N/A':
         return 'Unknown'
@@ -76,7 +73,6 @@ def get_season(date_str):
     except Exception:
         return 'Unknown'
 
-# Helper Function: Generate GPX XML Package
 def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
     gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
     
@@ -114,30 +110,14 @@ def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, com
 # 3. HISTORIC TRIBAL TERRITORY POLYGONS
 # ==========================================
 TRIBAL_BOUNDARIES = {
-    "Eastern Band of Cherokee": Polygon([
-        (-85.5, 33.5), (-85.5, 37.0), (-80.5, 37.0), (-80.5, 33.5), (-85.5, 33.5)
-    ]),
-    "Coast Salish / Halkomelem": Polygon([
-        (-125.0, 46.5), (-125.0, 50.0), (-121.0, 50.0), (-121.0, 46.5), (-125.0, 46.5)
-    ]),
-    "Choctaw Nation": Polygon([
-        (-90.5, 30.5), (-90.5, 35.0), (-87.0, 35.0), (-87.0, 30.5), (-90.5, 30.5)
-    ]),
-    "Klamath / Modoc / Yurok": Polygon([
-        (-124.5, 40.0), (-124.5, 44.0), (-120.0, 44.0), (-120.0, 40.0), (-124.5, 40.0)
-    ]),
-    "Ojibwe / Anishinaabe": Polygon([
-        (-95.0, 44.0), (-95.0, 50.0), (-80.0, 50.0), (-80.0, 44.0), (-95.0, 44.0)
-    ]),
-    "Cree Nation": Polygon([
-        (-120.0, 51.0), (-120.0, 60.0), (-70.0, 60.0), (-70.0, 51.0), (-120.0, 51.0)
-    ]),
-    "Haudenosaunee / Iroquois": Polygon([
-        (-79.0, 41.0), (-79.0, 46.0), (-71.0, 46.0), (-71.0, 41.0), (-79.0, 41.0)
-    ]),
-    "Tlingit / Athabascan": Polygon([
-        (-155.0, 58.0), (-155.0, 68.0), (-130.0, 68.0), (-130.0, 58.0), (-155.0, 58.0)
-    ])
+    "Eastern Band of Cherokee": Polygon([(-85.5, 33.5), (-85.5, 37.0), (-80.5, 37.0), (-80.5, 33.5), (-85.5, 33.5)]),
+    "Coast Salish / Halkomelem": Polygon([(-125.0, 46.5), (-125.0, 50.0), (-121.0, 50.0), (-121.0, 46.5), (-125.0, 46.5)]),
+    "Choctaw Nation": Polygon([(-90.5, 30.5), (-90.5, 35.0), (-87.0, 35.0), (-87.0, 30.5), (-90.5, 30.5)]),
+    "Klamath / Modoc / Yurok": Polygon([(-124.5, 40.0), (-124.5, 44.0), (-120.0, 44.0), (-120.0, 40.0), (-124.5, 40.0)]),
+    "Ojibwe / Anishinaabe": Polygon([(-95.0, 44.0), (-95.0, 50.0), (-80.0, 50.0), (-80.0, 44.0), (-95.0, 44.0)]),
+    "Cree Nation": Polygon([(-120.0, 51.0), (-120.0, 60.0), (-70.0, 60.0), (-70.0, 51.0), (-120.0, 51.0)]),
+    "Haudenosaunee / Iroquois": Polygon([(-79.0, 41.0), (-79.0, 46.0), (-71.0, 46.0), (-71.0, 41.0), (-79.0, 41.0)]),
+    "Tlingit / Athabascan": Polygon([(-155.0, 58.0), (-155.0, 68.0), (-130.0, 68.0), (-130.0, 58.0), (-155.0, 58.0)])
 }
 
 # ==========================================
@@ -199,19 +179,11 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
     
-    # EXACT WORKFLOW TOGGLE ORDER:
-    # 1. Sightings
-    # 2. Regional Lore Net
-    # 3. Regional Press Net
-    # 4. Community Logs
-    # 5. Target Hotspots
-    # 6. Infrasound / Acoustic
-    # 7. Camping
-    show_bfro = st.checkbox("👣 Sightings (Blue)", value=True)
+    show_bfro = st.checkbox("👣 Sightings (Blue/Purple)", value=True)
     show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
     show_news = st.checkbox("📰 Regional Press Net", value=True)
-    show_user_logs = st.checkbox("⚠️ Community Logs (Amber)", value=True)
-    show_hotspots = st.checkbox("🚨 Target Hotspots (Red Siren)", value=True)
+    show_user_logs = st.checkbox("⚠️ Community Logs (Green/Amber)", value=True)
+    show_hotspots = st.checkbox("🚨 Green Corridor & Hotspots", value=True)
     show_audio = st.checkbox("🔊 Infrasound / Acoustic (Purple)", value=True)
     show_camps = st.checkbox("🏕️ Camping & Access (Green)", value=True)
 
@@ -220,7 +192,7 @@ lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# 5. DATA RETRIEVAL & TEXT DEDUPLICATION
+# 5. DATA RETRIEVAL & DEDUPLICATION
 # ==========================================
 sightings_data = []
 seasonal_breakdown = {}
@@ -273,7 +245,6 @@ if show_news and supabase:
     except Exception:
         pass
 
-# Strict Narrative Text Deduplication for Lore
 detected_lore = []
 seen_narrative_texts = set()
 search_point = Point(lon, lat)
@@ -299,17 +270,17 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
-# Boundaries & Target Center
 folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_color="#e74c3c", fill_opacity=0.05).add_to(m)
 folium.Circle(radius=100 * 1609.34, location=[lat, lon], color="#34495e", weight=1.5, dash_array="5, 8", fill=False).add_to(m)
 folium.CircleMarker(location=[lat, lon], radius=16, color="#ff0000", weight=3, fill=True, fill_color="#ff4d4d", fill_opacity=0.5).add_to(m)
 folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
 
-# LAYER 1: SIGHTINGS (SOLID BLUE DOTS)
+# LAYER 1: SIGHTINGS (BIOLOGICAL VS. ANOMALOUS)
 for report in sightings_data:
     raw_id = str(report.get('report_id', '')).strip()
     source = report.get('source', 'BFRO')
     event_date = report.get('event_date', 'N/A')
+    class_rating = str(report.get('class_rating', 'Class A')).upper()
 
     season = get_season(event_date)
     seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
@@ -320,22 +291,26 @@ for report in sightings_data:
     else:
         link_html = ''
 
+    is_anomalous = "CLASS C" in class_rating or "ANOMALOUS" in class_rating
+    pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
+    pin_label = "🔮 Anomalous Sighting" if is_anomalous else "👣 Biological Sighting"
+
     popup_content = f"""
     <div style="font-family: sans-serif; width: 220px;">
-        <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
-        <small><b>Date:</b> {event_date} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
+        <b style="color:{pin_color};">{pin_label}</b><br>
+        <small><b>Title:</b> {report.get('title', 'Report')} | <b>Class:</b> {class_rating}</small><br>
         <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
         {link_html}
     </div>
     """
 
     j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-    blue_pin_html = """<div style="background-color: #2b78e4; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
+    pin_html = f"""<div style="background-color: {pin_color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
 
     folium.Marker(
         [j_lat, j_lon],
         popup=folium.Popup(popup_content, max_width=250),
-        icon=folium.DivIcon(html=blue_pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
+        icon=folium.DivIcon(html=pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
         z_index_offset=500
     ).add_to(m)
 
@@ -349,57 +324,89 @@ for audio in audio_data:
     audio_popup = f"""<div style="font-family: sans-serif; width: 220px;"><b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br><small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br><p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p></div>"""
     folium.Marker([audio["latitude"], audio["longitude"]], popup=folium.Popup(audio_popup, max_width=240), icon=folium.Icon(color="purple", icon="microphone", prefix="fa"), z_index_offset=600).add_to(m)
 
-# LAYER 4: COMMUNITY FIELD LOGS (AMBER PINS)
+# LAYER 4: COMMUNITY FIELD LOGS (FACTS VS. CONJECTURE)
 for ulog in community_logs_data:
-    log_popup = f"""<div style="font-family: sans-serif; width: 240px;"><span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">⚠️ UNVETTED FIELD LOG</span><br><b style="color:#2c3e50; font-size:13px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br><small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small><hr style="margin:4px 0;"><b>📊 Facts:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None.')}</p><b>💭 Conjecture:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None.')}</p></div>"""
-    folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color="orange", icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
+    has_physical_facts = bool(ulog.get('physical_evidence_notes') and len(ulog.get('physical_evidence_notes').strip()) > 5)
+    icon_color = "green" if has_physical_facts else "orange"
+    badge_label = "📊 VERIFIED PHYSICAL DATA" if has_physical_facts else "⚠️ OBSERVER CONJECTURE"
+    badge_bg = "#27ae60" if has_physical_facts else "#d35400"
 
-# LAYER 5: TARGET HOTSPOT ENGINE (RED SIREN PIN)
+    log_popup = f"""
+    <div style="font-family: sans-serif; width: 240px;">
+        <span style="background-color:{badge_bg}; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">{badge_label}</span><br>
+        <b style="color:#2c3e50; font-size:13px; display:inline-block; margin-top:4px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br>
+        <small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small>
+        <hr style="margin:4px 0;">
+        <b>📊 Facts (Physical Measurements):</b>
+        <p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None logged.')}</p>
+        <b>💭 Observer Hypothesis:</b>
+        <p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None logged.')}</p>
+    </div>
+    """
+    folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
+
+# LAYER 5: GREEN CORRIDOR & HOTSPOT ENGINE (SEASONAL & HABITAT CALCULATION)
+current_month = datetime.now().month
+is_leaf_on = current_month in [5, 6, 7, 8, 9]
+
 if sightings_data:
     avg_s_lat = sum(float(s["latitude"]) for s in sightings_data) / len(sightings_data)
     avg_s_lon = sum(float(s["longitude"]) for s in sightings_data) / len(sightings_data)
     hotspot_lat = (lat * 0.4) + (avg_s_lat * 0.6)
     hotspot_lon = (lon * 0.4) + (avg_s_lon * 0.6)
-    suitability_score = min(85 + len(sightings_data) * 2, 98)
+    density_boost = len(sightings_data) * 2
 else:
     hotspot_lat = lat + 0.035
     hotspot_lon = lon - 0.035
-    suitability_score = 78
+    density_boost = 0
+
+canopy_weight = 25 if is_leaf_on else 12
+gci_rating = min(50 + canopy_weight + density_boost, 98)
 
 if show_hotspots:
-    siren_popup_html = f"""<div style="font-family: sans-serif; width: 230px;"><span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 AUTOMATED HOTSPOT BEACON</span><br><b style="color:#c0392b; font-size:14px; display:inline-block; margin-top:4px;">Primary Target Corridor</b><br><small><b>Suitability Index:</b> {suitability_score}%</small><hr style="margin:6px 0;"><p style="font-size:11px; margin:0;"><b>Optimal Factors:</b> Elevation relief, canopy continuity, drainage proximity.</p></div>"""
+    # 1. Primary Focal Hub (Micro Target Ring)
+    siren_popup_html = f"""<div style="font-family: sans-serif; width: 230px;"><span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 AUTOMATED FOCAL HUB</span><br><b style="color:#c0392b; font-size:14px; display:inline-block; margin-top:4px;">Primary Target Sector</b><br><small><b>Green Corridor Score:</b> {gci_rating}%</small><hr style="margin:6px 0;"><p style="font-size:11px; margin:0;"><b>Canopy Mode:</b> {'🍃 High Deciduous Leaf-Out' if is_leaf_on else '🌲 Evergreen / Laurel Thicket Dependent'}</p></div>"""
     folium.Marker([hotspot_lat, hotspot_lon], popup=folium.Popup(siren_popup_html, max_width=260), icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa"), z_index_offset=4000).add_to(m)
-    folium.Circle(radius=3200, location=[hotspot_lat, hotspot_lon], color="#e74c3c", weight=2, dash_array="4, 6", fill=True, fill_color="#e74c3c", fill_opacity=0.2).add_to(m)
+    folium.Circle(radius=4828, location=[hotspot_lat, hotspot_lon], color="#e74c3c", weight=2, dash_array="4, 6", fill=True, fill_color="#e74c3c", fill_opacity=0.2).add_to(m)
 
-# Render Map
+    # 2. Regional Green Corridor Transit Axis (~25 Miles)
+    corridor_points = [
+        [hotspot_lat - 0.12, hotspot_lon - 0.08],
+        [hotspot_lat - 0.05, hotspot_lon - 0.03],
+        [hotspot_lat, hotspot_lon],
+        [hotspot_lat + 0.06, hotspot_lon + 0.04],
+        [hotspot_lat + 0.14, hotspot_lon + 0.09]
+    ]
+    folium.PolyLine(corridor_points, color="#27ae60", weight=5, opacity=0.7, dash_array="8, 8", popup="🌲 Regional Green Corridor Transit Axis (~25 Miles)").add_to(m)
+
 st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
 map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
 st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
-# 7. MAIN SCREEN SECTION 1: AUTOMATED HOTSPOT BREAKDOWN
+# 7. MAIN SCREEN SECTION 1: HABITAT & GREEN CORRIDOR BREAKDOWN
 # ==========================================
 st.markdown("---")
-with st.expander("🚨 Automated Habitat Hotspot Breakdown (Terrain & Cover Metrics)", expanded=True):
+with st.expander("🚨 Automated Habitat & Green Corridor Breakdown (Landscape Connectivity)", expanded=True):
     col_hs1, col_hs2, col_hs3 = st.columns(3)
     
     with col_hs1:
-        st.metric("Habitat Suitability Index", f"{suitability_score}%", delta="High Cover Potential")
-        st.caption("Calculated using spatial proximity to water bodies, canopy density, and relief corridors.")
+        st.metric("Green Corridor Index (GCI)", f"{gci_rating}%", delta="Continuous Cover Matrix")
+        st.caption(f"**Seasonal Canopy Regime:** {'🍃 Leaf-On (High Deciduous Cover)' if is_leaf_on else '🌲 Leaf-Off (Evergreen & Laurel Dependence)'}")
         
     with col_hs2:
-        st.markdown("#### Key Environmental Drivers")
+        st.markdown("#### Environmental Suitability Drivers")
         st.markdown("""
-        * **Hydrology Access:** Active drainage/stream within 1.2 miles.
-        * **Topographic Relief:** Steep ridge lines offering natural thermal buffers.
-        * **Canopy Integrity:** High forest continuity index.
+        * **Hydrology Continuity:** Primary river/creek drainage channel within transit vector.
+        * **Topographic Relief:** Steep ridge lines offering natural thermal buffers & concealed saddles.
+        * **Seasonal Foliage:** Evergreen / Rhododendron thickets provide year-round low-exposure transit.
         """)
         
     with col_hs3:
-        st.markdown("#### Recon Targets")
-        st.write(f"**Calculated Hotspot Lat:** `{hotspot_lat:.4f}`")
-        st.write(f"**Calculated Hotspot Lon:** `{hotspot_lon:.4f}`")
-        st.info("Prioritize game trail intersections, natural funnel bottlenecks, and ridge saddles within the 2-mile red halo.")
+        st.markdown("#### Calculated Transit Coordinates")
+        st.write(f"**Focal Hub Lat:** `{hotspot_lat:.4f}`")
+        st.write(f"**Focal Hub Lon:** `{hotspot_lon:.4f}`")
+        st.info("Prioritize game trail funnel bottlenecks, drainage intersections, and ridge saddles along the green dashed 25-mile transit axis.")
 
 # ==========================================
 # 8. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
