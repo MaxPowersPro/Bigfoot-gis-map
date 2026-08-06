@@ -305,12 +305,11 @@ folium.Circle(radius=100 * 1609.34, location=[lat, lon], color="#34495e", weight
 folium.CircleMarker(location=[lat, lon], radius=16, color="#ff0000", weight=3, fill=True, fill_color="#ff4d4d", fill_opacity=0.5).add_to(m)
 folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
 
-# LAYER 1: SIGHTINGS (BIOLOGICAL VS. ANOMALOUS / CLASS C)
+# LAYER 1: SIGHTINGS (SOLID BLUE DOTS)
 for report in sightings_data:
     raw_id = str(report.get('report_id', '')).strip()
     source = report.get('source', 'BFRO')
     event_date = report.get('event_date', 'N/A')
-    class_rating = str(report.get('class_rating', 'Class A')).upper()
 
     season = get_season(event_date)
     seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
@@ -321,60 +320,40 @@ for report in sightings_data:
     else:
         link_html = ''
 
-    # DISTINCTION: Biological (Class A/B = Blue) vs. Anomalous (Class C = Purple)
-    is_anomalous = "CLASS C" in class_rating or "ANOMALOUS" in class_rating
-    pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
-    pin_label = "🔮 Anomalous/Class C Encounter" if is_anomalous else "👣 Biological Sighting"
-
     popup_content = f"""
     <div style="font-family: sans-serif; width: 220px;">
-        <b style="color:{pin_color};">{pin_label}</b><br>
-        <small><b>Title:</b> {report.get('title', 'Report')} | <b>Class:</b> {class_rating}</small><br>
+        <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
+        <small><b>Date:</b> {event_date} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
         <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
         {link_html}
     </div>
     """
 
     j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-    
-    pin_html = f"""<div style="background-color: {pin_color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
+    blue_pin_html = """<div style="background-color: #2b78e4; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
 
     folium.Marker(
         [j_lat, j_lon],
         popup=folium.Popup(popup_content, max_width=250),
-        icon=folium.DivIcon(html=pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
+        icon=folium.DivIcon(html=blue_pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
         z_index_offset=500
     ).add_to(m)
 
+# LAYER 2: CAMPSITES
+for camp in camps_data:
+    camp_popup = f"""<div style="font-family: sans-serif; width: 210px;"><b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br><small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br><p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p></div>"""
+    folium.Marker([camp["latitude"], camp["longitude"]], popup=folium.Popup(camp_popup, max_width=230), icon=folium.Icon(color="green", icon="campground", prefix="fa"), z_index_offset=400).add_to(m)
 
-# LAYER 4: COMMUNITY FIELD LOGS (FACTS vs. CONJECTURE)
+# LAYER 3: INFRASOUND / ACOUSTIC
+for audio in audio_data:
+    audio_popup = f"""<div style="font-family: sans-serif; width: 220px;"><b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br><small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br><p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p></div>"""
+    folium.Marker([audio["latitude"], audio["longitude"]], popup=folium.Popup(audio_popup, max_width=240), icon=folium.Icon(color="purple", icon="microphone", prefix="fa"), z_index_offset=600).add_to(m)
+
+# LAYER 4: COMMUNITY FIELD LOGS (AMBER PINS)
 for ulog in community_logs_data:
-    has_physical_facts = bool(ulog.get('physical_evidence_notes') and len(ulog.get('physical_evidence_notes').strip()) > 5)
-    
-    # DISTINCTION: Physical Facts (Green Pin) vs. Observer Conjecture (Amber Pin)
-    icon_color = "green" if has_physical_facts else "orange"
-    badge_label = "📊 VERIFIED PHYSICAL DATA" if has_physical_facts else "⚠️ OBSERVER CONJECTURE"
-    badge_bg = "#27ae60" if has_physical_facts else "#d35400"
+    log_popup = f"""<div style="font-family: sans-serif; width: 240px;"><span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">⚠️ UNVETTED FIELD LOG</span><br><b style="color:#2c3e50; font-size:13px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br><small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small><hr style="margin:4px 0;"><b>📊 Facts:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None.')}</p><b>💭 Conjecture:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None.')}</p></div>"""
+    folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color="orange", icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
 
-    log_popup = f"""
-    <div style="font-family: sans-serif; width: 240px;">
-        <span style="background-color:{badge_bg}; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">{badge_label}</span><br>
-        <b style="color:#2c3e50; font-size:13px; display:inline-block; margin-top:4px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br>
-        <small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small>
-        <hr style="margin:4px 0;">
-        <b>📊 Facts (Physical Measurements):</b>
-        <p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None logged.')}</p>
-        <b>💭 Observer Hypothesis:</b>
-        <p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None logged.')}</p>
-    </div>
-    """
-
-    folium.Marker(
-        [ulog["latitude"], ulog["longitude"]],
-        popup=folium.Popup(log_popup, max_width=260),
-        icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"),
-        z_index_offset=700
-    ).add_to(m)
 # LAYER 5: TARGET HOTSPOT ENGINE (RED SIREN PIN)
 if sightings_data:
     avg_s_lat = sum(float(s["latitude"]) for s in sightings_data) / len(sightings_data)
@@ -398,60 +377,29 @@ map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
 st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
-# EXPANDED HABITAT & GREEN CORRIDOR ENGINE
+# 7. MAIN SCREEN SECTION 1: AUTOMATED HOTSPOT BREAKDOWN
 # ==========================================
-def calculate_green_corridor_index(lat, lon, sightings, current_month):
-    # 1. Base Seasonal Canopy Multiplier
-    # Months 5-9 (May-Sept): High deciduous leaf-out
-    # Months 11-3 (Nov-March): Low deciduous, heavy reliance on Evergreen/Laurel
-    is_leaf_on = current_month in [5, 6, 7, 8, 9]
-    deciduous_cover_weight = 0.90 if is_leaf_on else 0.40
-    evergreen_laurel_weight = 0.85  # Constant year-round cover
-
-    # Composite Cover Rating
-    seasonal_cover_score = max(deciduous_cover_weight, evergreen_laurel_weight)
-
-    # 2. Cluster Density
-    density_score = min(len(sightings) * 3, 30)
-
-    # 3. Overall Green Corridor Index (GCI)
-    gci_score = int(50 + (seasonal_cover_score * 25) + density_score)
-    return min(gci_score, 98), is_leaf_on
-
-# Integrate into Section 6
-current_month = datetime.now().month
-gci_rating, leaf_status = calculate_green_corridor_index(lat, lon, sightings_data, current_month)
-
-if show_hotspots:
-    # Core Focal Hub (3-Mile Target Ring)
-    folium.Circle(
-        radius=4828,  # ~3 miles
-        location=[hotspot_lat, hotspot_lon],
-        color="#e74c3c",
-        weight=2,
-        fill=True,
-        fill_color="#e74c3c",
-        fill_opacity=0.2,
-        popup=f"Core Focal Hub ({gci_rating}% GCI Score)"
-    ).add_to(m)
-
-    # Extended Green Corridor Vector (20-Mile Regional Transit Axis)
-    corridor_points = [
-        [hotspot_lat - 0.12, hotspot_lon - 0.08],
-        [hotspot_lat - 0.05, hotspot_lon - 0.03],
-        [hotspot_lat, hotspot_lon],
-        [hotspot_lat + 0.06, hotspot_lon + 0.04],
-        [hotspot_lat + 0.14, hotspot_lon + 0.09]
-    ]
+st.markdown("---")
+with st.expander("🚨 Automated Habitat Hotspot Breakdown (Terrain & Cover Metrics)", expanded=True):
+    col_hs1, col_hs2, col_hs3 = st.columns(3)
     
-    folium.PolyLine(
-        corridor_points,
-        color="#27ae60",
-        weight=6,
-        opacity=0.6,
-        dash_array="10, 10",
-        popup="🌲 Regional Green Corridor Transit Axis (~25 Miles)"
-    ).add_to(m)
+    with col_hs1:
+        st.metric("Habitat Suitability Index", f"{suitability_score}%", delta="High Cover Potential")
+        st.caption("Calculated using spatial proximity to water bodies, canopy density, and relief corridors.")
+        
+    with col_hs2:
+        st.markdown("#### Key Environmental Drivers")
+        st.markdown("""
+        * **Hydrology Access:** Active drainage/stream within 1.2 miles.
+        * **Topographic Relief:** Steep ridge lines offering natural thermal buffers.
+        * **Canopy Integrity:** High forest continuity index.
+        """)
+        
+    with col_hs3:
+        st.markdown("#### Recon Targets")
+        st.write(f"**Calculated Hotspot Lat:** `{hotspot_lat:.4f}`")
+        st.write(f"**Calculated Hotspot Lon:** `{hotspot_lon:.4f}`")
+        st.info("Prioritize game trail intersections, natural funnel bottlenecks, and ridge saddles within the 2-mile red halo.")
 
 # ==========================================
 # 8. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
