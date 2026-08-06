@@ -305,11 +305,12 @@ folium.Circle(radius=100 * 1609.34, location=[lat, lon], color="#34495e", weight
 folium.CircleMarker(location=[lat, lon], radius=16, color="#ff0000", weight=3, fill=True, fill_color="#ff4d4d", fill_opacity=0.5).add_to(m)
 folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
 
-# LAYER 1: SIGHTINGS (SOLID BLUE DOTS)
+# LAYER 1: SIGHTINGS (BIOLOGICAL VS. ANOMALOUS / CLASS C)
 for report in sightings_data:
     raw_id = str(report.get('report_id', '')).strip()
     source = report.get('source', 'BFRO')
     event_date = report.get('event_date', 'N/A')
+    class_rating = str(report.get('class_rating', 'Class A')).upper()
 
     season = get_season(event_date)
     seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
@@ -320,40 +321,60 @@ for report in sightings_data:
     else:
         link_html = ''
 
+    # DISTINCTION: Biological (Class A/B = Blue) vs. Anomalous (Class C = Purple)
+    is_anomalous = "CLASS C" in class_rating or "ANOMALOUS" in class_rating
+    pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
+    pin_label = "🔮 Anomalous/Class C Encounter" if is_anomalous else "👣 Biological Sighting"
+
     popup_content = f"""
     <div style="font-family: sans-serif; width: 220px;">
-        <b style="color:#2c3e50;">👣 {report.get('title', 'Sighting Report')}</b><br>
-        <small><b>Date:</b> {event_date} | <b>Class:</b> {report.get('class_rating', 'A/B')}</small><br>
+        <b style="color:{pin_color};">{pin_label}</b><br>
+        <small><b>Title:</b> {report.get('title', 'Report')} | <b>Class:</b> {class_rating}</small><br>
         <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
         {link_html}
     </div>
     """
 
     j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-    blue_pin_html = """<div style="background-color: #2b78e4; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
+    
+    pin_html = f"""<div style="background-color: {pin_color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
 
     folium.Marker(
         [j_lat, j_lon],
         popup=folium.Popup(popup_content, max_width=250),
-        icon=folium.DivIcon(html=blue_pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
+        icon=folium.DivIcon(html=pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
         z_index_offset=500
     ).add_to(m)
 
-# LAYER 2: CAMPSITES
-for camp in camps_data:
-    camp_popup = f"""<div style="font-family: sans-serif; width: 210px;"><b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br><small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br><p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p></div>"""
-    folium.Marker([camp["latitude"], camp["longitude"]], popup=folium.Popup(camp_popup, max_width=230), icon=folium.Icon(color="green", icon="campground", prefix="fa"), z_index_offset=400).add_to(m)
 
-# LAYER 3: INFRASOUND / ACOUSTIC
-for audio in audio_data:
-    audio_popup = f"""<div style="font-family: sans-serif; width: 220px;"><b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br><small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br><p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p></div>"""
-    folium.Marker([audio["latitude"], audio["longitude"]], popup=folium.Popup(audio_popup, max_width=240), icon=folium.Icon(color="purple", icon="microphone", prefix="fa"), z_index_offset=600).add_to(m)
-
-# LAYER 4: COMMUNITY FIELD LOGS (AMBER PINS)
+# LAYER 4: COMMUNITY FIELD LOGS (FACTS vs. CONJECTURE)
 for ulog in community_logs_data:
-    log_popup = f"""<div style="font-family: sans-serif; width: 240px;"><span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">⚠️ UNVETTED FIELD LOG</span><br><b style="color:#2c3e50; font-size:13px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br><small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small><hr style="margin:4px 0;"><b>📊 Facts:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None.')}</p><b>💭 Conjecture:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None.')}</p></div>"""
-    folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color="orange", icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
+    has_physical_facts = bool(ulog.get('physical_evidence_notes') and len(ulog.get('physical_evidence_notes').strip()) > 5)
+    
+    # DISTINCTION: Physical Facts (Green Pin) vs. Observer Conjecture (Amber Pin)
+    icon_color = "green" if has_physical_facts else "orange"
+    badge_label = "📊 VERIFIED PHYSICAL DATA" if has_physical_facts else "⚠️ OBSERVER CONJECTURE"
+    badge_bg = "#27ae60" if has_physical_facts else "#d35400"
 
+    log_popup = f"""
+    <div style="font-family: sans-serif; width: 240px;">
+        <span style="background-color:{badge_bg}; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">{badge_label}</span><br>
+        <b style="color:#2c3e50; font-size:13px; display:inline-block; margin-top:4px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br>
+        <small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small>
+        <hr style="margin:4px 0;">
+        <b>📊 Facts (Physical Measurements):</b>
+        <p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None logged.')}</p>
+        <b>💭 Observer Hypothesis:</b>
+        <p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None logged.')}</p>
+    </div>
+    """
+
+    folium.Marker(
+        [ulog["latitude"], ulog["longitude"]],
+        popup=folium.Popup(log_popup, max_width=260),
+        icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"),
+        z_index_offset=700
+    ).add_to(m)
 # LAYER 5: TARGET HOTSPOT ENGINE (RED SIREN PIN)
 if sightings_data:
     avg_s_lat = sum(float(s["latitude"]) for s in sightings_data) / len(sightings_data)
