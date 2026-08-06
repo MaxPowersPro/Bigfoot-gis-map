@@ -22,7 +22,7 @@ st.set_page_config(
 st.title("👣 Bigfoot Field Analysis Platform")
 st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
 
-# GUARANTEE SESSION STATE KEYS EXIST AT RUNTIME
+# Guarantee session state keys exist at runtime
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
 if "user_lon" not in st.session_state:
@@ -30,7 +30,6 @@ if "user_lon" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = "Massachusetts Target Zone"
 
-# Extract core location variables globally for all sections
 lat = float(st.session_state.user_lat)
 lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
@@ -81,33 +80,28 @@ def get_season(date_str):
 def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
     gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
     
-    # Target Center
     wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
     ET.SubElement(wpt_target, "name").text = f"TARGET: {loc_title}"
     ET.SubElement(wpt_target, "sym").text = "Cross-Hair"
     
-    # Sightings
     for s in sightings:
         wpt = ET.SubElement(gpx, "wpt", lat=str(s.get("latitude")), lon=str(s.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Sighting: {s.get('title', 'BFRO Report')}"
         ET.SubElement(wpt, "desc").text = f"Date: {s.get('event_date', 'N/A')} | Summary: {s.get('summary', '')}"
         ET.SubElement(wpt, "sym").text = "Footprint"
 
-    # Campsites
     for c in camps:
         wpt = ET.SubElement(gpx, "wpt", lat=str(c.get("latitude")), lon=str(c.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Camp: {c.get('name', 'Campsite')}"
         ET.SubElement(wpt, "desc").text = c.get('description', '')
         ET.SubElement(wpt, "sym").text = "Campground"
 
-    # Audio
     for a in audio:
         wpt = ET.SubElement(gpx, "wpt", lat=str(a.get("latitude")), lon=str(a.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Audio: {a.get('event_type', 'Infrasound Log')}"
         ET.SubElement(wpt, "desc").text = a.get('notes', '')
         ET.SubElement(wpt, "sym").text = "Sound"
 
-    # Community Field Logs
     for log in community_logs:
         wpt = ET.SubElement(gpx, "wpt", lat=str(log.get("latitude")), lon=str(log.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Field Log: {log.get('observation_type', 'Unvetted Log')}"
@@ -147,7 +141,7 @@ TRIBAL_BOUNDARIES = {
 }
 
 # ==========================================
-# 4. SIDEBAR CONTROLS & MAPBOX GEOLOCATION
+# 4. SIDEBAR CONTROLS & EXACT TOGGLE ORDER
 # ==========================================
 def geocode_mapbox(query):
     token = st.secrets.get("MAPBOX_TOKEN")
@@ -204,20 +198,29 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
+    
+    # EXACT WORKFLOW TOGGLE ORDER:
+    # 1. Sightings
+    # 2. Regional Lore Net
+    # 3. Regional Press Net
+    # 4. Community Logs
+    # 5. Target Hotspots
+    # 6. Infrasound / Acoustic
+    # 7. Camping
     show_bfro = st.checkbox("👣 Sightings (Blue)", value=True)
-    show_camps = st.checkbox("🏕️ Campsites (Green)", value=True)
-    show_audio = st.checkbox("🔊 Infrasound (Purple)", value=True)
-    show_user_logs = st.checkbox("⚠️ Community Logs (Amber)", value=True)
     show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
     show_news = st.checkbox("📰 Regional Press Net", value=True)
+    show_user_logs = st.checkbox("⚠️ Community Logs (Amber)", value=True)
+    show_hotspots = st.checkbox("🚨 Target Hotspots (Red Siren)", value=True)
+    show_audio = st.checkbox("🔊 Infrasound / Acoustic (Purple)", value=True)
+    show_camps = st.checkbox("🏕️ Camping & Access (Green)", value=True)
 
-# Re-update global variables after potential sidebar interactions
 lat = float(st.session_state.user_lat)
 lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# 5. DATA RETRIEVAL & DEDUPLICATION
+# 5. DATA RETRIEVAL & TEXT DEDUPLICATION
 # ==========================================
 sightings_data = []
 seasonal_breakdown = {}
@@ -270,8 +273,9 @@ if show_news and supabase:
     except Exception:
         pass
 
+# Strict Narrative Text Deduplication for Lore
 detected_lore = []
-seen_lore_ids = set()
+seen_narrative_texts = set()
 search_point = Point(lon, lat)
 
 if supabase and show_lore:
@@ -280,9 +284,9 @@ if supabase and show_lore:
             lore_resp = supabase.table("tribal_lore").select("*").eq("tribe_name", tribe_name).execute()
             if lore_resp.data:
                 for lore_item in lore_resp.data:
-                    lore_id = lore_item.get("id") or lore_item.get("entity_name")
-                    if lore_id not in seen_lore_ids:
-                        seen_lore_ids.add(lore_id)
+                    narrative = lore_item.get("full_narrative", "").strip()
+                    if narrative and narrative not in seen_narrative_texts:
+                        seen_narrative_texts.add(narrative)
                         detected_lore.append(lore_item)
 
 # ==========================================
@@ -295,47 +299,11 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
-# 50-Mile Field Boundary
-folium.Circle(
-    radius=radius_miles * 1609.34,
-    location=[lat, lon],
-    color="#e74c3c",
-    weight=2,
-    fill=True,
-    fill_color="#e74c3c",
-    fill_opacity=0.05,
-    popup=f"Field Radius ({radius_miles} Miles)"
-).add_to(m)
-
-# 100-Mile Regional Boundary
-folium.Circle(
-    radius=100 * 1609.34,
-    location=[lat, lon],
-    color="#34495e",
-    weight=1.5,
-    dash_array="5, 8",
-    fill=False,
-    popup="100-Mile Regional Intelligence Boundary"
-).add_to(m)
-
-# Target Center Beacon
-folium.CircleMarker(
-    location=[lat, lon],
-    radius=16,
-    color="#ff0000",
-    weight=3,
-    fill=True,
-    fill_color="#ff4d4d",
-    fill_opacity=0.5,
-    popup=f"<b>TARGET CENTER HALO</b><br>{loc_name}"
-).add_to(m)
-
-folium.Marker(
-    [lat, lon],
-    popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}",
-    icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
-    z_index_offset=3000
-).add_to(m)
+# Boundaries & Target Center
+folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_color="#e74c3c", fill_opacity=0.05).add_to(m)
+folium.Circle(radius=100 * 1609.34, location=[lat, lon], color="#34495e", weight=1.5, dash_array="5, 8", fill=False).add_to(m)
+folium.CircleMarker(location=[lat, lon], radius=16, color="#ff0000", weight=3, fill=True, fill_color="#ff4d4d", fill_opacity=0.5).add_to(m)
+folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
 
 # LAYER 1: SIGHTINGS (SOLID BLUE DOTS)
 for report in sightings_data:
@@ -362,17 +330,7 @@ for report in sightings_data:
     """
 
     j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-
-    blue_pin_html = """
-    <div style="
-        background-color: #2b78e4; 
-        width: 14px; 
-        height: 14px; 
-        border-radius: 50%; 
-        border: 2px solid white; 
-        box-shadow: 0 0 4px rgba(0,0,0,0.5);">
-    </div>
-    """
+    blue_pin_html = """<div style="background-color: #2b78e4; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
 
     folium.Marker(
         [j_lat, j_lon],
@@ -383,283 +341,50 @@ for report in sightings_data:
 
 # LAYER 2: CAMPSITES
 for camp in camps_data:
-    camp_popup = f"""
-    <div style="font-family: sans-serif; width: 210px;">
-        <b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br>
-        <small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br>
-        <p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p>
-    </div>
-    """
-    folium.Marker(
-        [camp["latitude"], camp["longitude"]],
-        popup=folium.Popup(camp_popup, max_width=230),
-        icon=folium.Icon(color="green", icon="campground", prefix="fa"),
-        z_index_offset=400
-    ).add_to(m)
+    camp_popup = f"""<div style="font-family: sans-serif; width: 210px;"><b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br><small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br><p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p></div>"""
+    folium.Marker([camp["latitude"], camp["longitude"]], popup=folium.Popup(camp_popup, max_width=230), icon=folium.Icon(color="green", icon="campground", prefix="fa"), z_index_offset=400).add_to(m)
 
 # LAYER 3: INFRASOUND / ACOUSTIC
 for audio in audio_data:
-    audio_popup = f"""
-    <div style="font-family: sans-serif; width: 220px;">
-        <b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br>
-        <small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br>
-        <p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p>
-    </div>
-    """
-    folium.Marker(
-        [audio["latitude"], audio["longitude"]],
-        popup=folium.Popup(audio_popup, max_width=240),
-        icon=folium.Icon(color="purple", icon="microphone", prefix="fa"),
-        z_index_offset=600
-    ).add_to(m)
+    audio_popup = f"""<div style="font-family: sans-serif; width: 220px;"><b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br><small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br><p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p></div>"""
+    folium.Marker([audio["latitude"], audio["longitude"]], popup=folium.Popup(audio_popup, max_width=240), icon=folium.Icon(color="purple", icon="microphone", prefix="fa"), z_index_offset=600).add_to(m)
 
 # LAYER 4: COMMUNITY FIELD LOGS (AMBER PINS)
 for ulog in community_logs_data:
-    log_popup = f"""
-    <div style="font-family: sans-serif; width: 240px;">
-        <span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">⚠️ UNVETTED FIELD LOG</span><br>
-        <b style="color:#2c3e50; font-size:13px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br>
-        <small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small>
-        <hr style="margin:4px 0;">
-        <b>📊 Facts (Hard Data):</b>
-        <p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None logged.')}</p>
-        <b>💭 Field Conjecture:</b>
-        <p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None logged.')}</p>
-    </div>
-    """
-    folium.Marker(
-        [ulog["latitude"], ulog["longitude"]],
-        popup=folium.Popup(log_popup, max_width=260),
-        icon=folium.Icon(color="orange", icon="clipboard", prefix="fa"),
-        z_index_offset=700
-    ).add_to(m)
+    log_popup = f"""<div style="font-family: sans-serif; width: 240px;"><span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">⚠️ UNVETTED FIELD LOG</span><br><b style="color:#2c3e50; font-size:13px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br><small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small><hr style="margin:4px 0;"><b>📊 Facts:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None.')}</p><b>💭 Conjecture:</b><p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None.')}</p></div>"""
+    folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color="orange", icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
 
-# ON-MAP ALERT BADGE
-total_regional_records = len(local_media_records) + len(detected_lore)
-if total_regional_records > 0:
-    badge_html = f"""
-    <div style="
-        position: fixed; 
-        bottom: 20px; 
-        left: 20px; 
-        z-index: 9999; 
-        background-color: #2c3e50; 
-        color: white; 
-        padding: 10px 14px; 
-        border-radius: 8px; 
-        box-shadow: 0 2px 8px rgba(0,0,0,0.4); 
-        font-family: sans-serif; 
-        font-size: 13px; 
-        font-weight: bold; 
-        border: 1px solid #34495e;">
-        📰 🪶 {total_regional_records} Regional Accounts Active (100-Mi. Net) — <a href="#regional-panel" style="color:#f39c12; text-decoration:underline;">Scroll Down to Read</a>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(badge_html))
-
-# Render Map
-st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
-
-map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
-st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
-# ==========================================
-# 6.1 AUTOMATED HABITAT HOTSPOT ENGINE (RED SIREN PIN)
-# ==========================================
-# Calculate spatial centroid weight if sightings exist near active target
+# LAYER 5: TARGET HOTSPOT ENGINE (RED SIREN PIN)
 if sightings_data:
     avg_s_lat = sum(float(s["latitude"]) for s in sightings_data) / len(sightings_data)
     avg_s_lon = sum(float(s["longitude"]) for s in sightings_data) / len(sightings_data)
-    
-    # Micro-offset toward high-elevation/water corridor baseline
     hotspot_lat = (lat * 0.4) + (avg_s_lat * 0.6)
     hotspot_lon = (lon * 0.4) + (avg_s_lon * 0.6)
     suitability_score = min(85 + len(sightings_data) * 2, 98)
 else:
-    # Baseline terrain offset when no sightings are present in radius
-    hotspot_lat = lat + 0.042
-    hotspot_lon = lon - 0.038
+    hotspot_lat = lat + 0.035
+    hotspot_lon = lon - 0.035
     suitability_score = 78
 
-# Drop Red Siren Beacon on Map
-siren_popup_html = f"""
-<div style="font-family: sans-serif; width: 230px;">
-    <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 AUTOMATED HOTSPOT BEACON</span><br>
-    <b style="color:#c0392b; font-size:14px; display:inline-block; margin-top:4px;">Primary Target Corridor</b><br>
-    <small><b>Suitability Index:</b> {suitability_score}%</small><br>
-    <hr style="margin:6px 0;">
-    <p style="font-size:11px; margin:0;">
-        <b>Optimal Factors:</b> High elevation relief, dense canopy continuity, proximity to primary water drainages.
-    </p>
-</div>
-"""
+if show_hotspots:
+    siren_popup_html = f"""<div style="font-family: sans-serif; width: 230px;"><span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 AUTOMATED HOTSPOT BEACON</span><br><b style="color:#c0392b; font-size:14px; display:inline-block; margin-top:4px;">Primary Target Corridor</b><br><small><b>Suitability Index:</b> {suitability_score}%</small><hr style="margin:6px 0;"><p style="font-size:11px; margin:0;"><b>Optimal Factors:</b> Elevation relief, canopy continuity, drainage proximity.</p></div>"""
+    folium.Marker([hotspot_lat, hotspot_lon], popup=folium.Popup(siren_popup_html, max_width=260), icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa"), z_index_offset=4000).add_to(m)
+    folium.Circle(radius=3200, location=[hotspot_lat, hotspot_lon], color="#e74c3c", weight=2, dash_array="4, 6", fill=True, fill_color="#e74c3c", fill_opacity=0.2).add_to(m)
 
-folium.Marker(
-    [hotspot_lat, hotspot_lon],
-    popup=folium.Popup(siren_popup_html, max_width=260),
-    icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa"),
-    z_index_offset=4000
-).add_to(m)
+# Render Map
+st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
+map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
+st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
-# Add Pulsing Hotspot Radius Ring
-folium.Circle(
-    radius=3200,  # ~2-mile core focus zone
-    location=[hotspot_lat, hotspot_lon],
-    color="#e74c3c",
-    weight=2,
-    dash_array="4, 6",
-    fill=True,
-    fill_color="#e74c3c",
-    fill_opacity=0.25,
-    popup=f"Core Target Zone ({suitability_score}% Suitability)"
-).add_to(m)
 # ==========================================
-# 7. INVESTIGATOR FIELD LOG FORM (UN-LED NEUTRAL ENGINE)
+# 7. MAIN SCREEN SECTION 1: AUTOMATED HOTSPOT BREAKDOWN
 # ==========================================
 st.markdown("---")
-with st.expander("📝 Submit Investigator Field Log (Objective Data Engine)", expanded=False):
-    st.caption("Log field observations directly to your private account or contribute unvetted data to the community layer.")
-    
-    with st.form("investigator_log_form", clear_on_submit=True):
-        st.subheader("1. Privacy & Storage Settings")
-        visibility = st.radio(
-            "Log Storage Mode:", 
-            ["🔒 Private Vault (Only Me)", "🌐 Public Community Layer (Unvetted)"], 
-            horizontal=True
-        )
-        is_public = True if "Public" in visibility else False
-
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            obs_type = st.selectbox(
-                "Nature of Physical Evidence", 
-                [
-                    "Suspect Impression",
-                    "Potential Nesting / Matting Site",
-                    "Vegetation Disturbance / Fractured Foliage",
-                    "Acoustic Event / Audio Record",
-                    "Visual Observation",
-                    "Unidentified Biological Trace",
-                    "Unusual Environmental Anomaly"
-                ]
-            )
-        with col_f2:
-            obs_date = st.date_input("Observation Date", value=datetime.now())
-        with col_f3:
-            st.write("Coordinates")
-            log_lat = st.number_input("Latitude", value=float(lat), format="%.5f")
-            log_lon = st.number_input("Longitude", value=float(lon), format="%.5f")
-
-        st.markdown("---")
-        st.subheader("2. Hard Field Data (Objective Facts)")
-        col_facts1, col_facts2 = st.columns(2)
-        with col_facts1:
-            weather_temp = st.text_input(
-                "Environmental Baseline & Elevation", 
-                placeholder="e.g. 54°F, Clear, High Humidity, 1,200ft elevation"
-            )
-        with col_facts2:
-            habitat_type = st.text_input(
-                "Habitat & Terrain Type", 
-                placeholder="e.g. Dense Pine Ridge near river drainage"
-            )
-        
-        physical_notes = st.text_area(
-            "Exactly what did you find? (Hard Physical Facts Only)", 
-            placeholder="Describe physical reality without assumptions: exact measurements (length, depth, stride), scale markers used, lighting conditions, or trail surface."
-        )
-
-        st.markdown("---")
-        st.subheader("3. Observer Conjecture & Hypothesis")
-        col_conj1, col_conj2 = st.columns(2)
-        with col_conj1:
-            size_stride = st.text_input(
-                "Estimated Dimensions / Stride / Gait", 
-                placeholder="e.g. Estimated stride 44 inches, deep ground depression"
-            )
-        with col_conj2:
-            st.caption("Keep subjective impressions and personal hypotheses strictly separate from hard measurements.")
-        
-        field_narrative = st.text_area(
-            "Field Narrative & Personal Interpretation", 
-            placeholder="What do you personally hypothesize caused or created this? Describe context, sequence of events, or subjective impressions."
-        )
-
-        st.markdown("---")
-        st.subheader("4. Code of Ethics & Agreement")
-        ethics_agree = st.checkbox(
-            "I certify this is an honest field record and agree to abide by the Field Code of Ethics (zero trespassing, non-harassment of wildlife, and objective reporting)."
-        )
-
-        submit_btn = st.form_submit_button("💾 Save Investigator Field Log", use_container_width=True)
-
-        if submit_btn:
-            if not ethics_agree:
-                st.error("You must agree to the Field Code of Ethics to submit a log.")
-            elif not supabase:
-                st.error("Database connection unavailable.")
-            else:
-                try:
-                    log_payload = {
-                        "is_public": is_public,
-                        "observation_type": obs_type,
-                        "event_date": str(obs_date),
-                        "latitude": log_lat,
-                        "longitude": log_lon,
-                        "weather_temp": weather_temp,
-                        "habitat_type": habitat_type,
-                        "physical_evidence_notes": physical_notes,
-                        "estimated_size_stride": size_stride,
-                        "field_narrative": field_narrative,
-                        "ethics_agreed": True
-                    }
-                    supabase.table("investigator_logs").insert(log_payload).execute()
-                    st.success("Investigator Field Log successfully recorded!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error saving log: {e}")
-
-# ==========================================
-# 8. REGIONAL FAUNA & BIOACOUSTIC REFERENCE ENGINE
-# ==========================================
-st.markdown("---")
-with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine (Un-Led Acoustic Analysis)", expanded=False):
-    st.caption("Cross-reference field audio against native regional wildlife vocal repertoires before logging anomalous acoustic events.")
-    
-    st.warning(
-        "**Field Science Note on Vocal Spectrum:** Native species possess extensive vocal ranges often mistaken for anomalous sounds. "
-        "For example, Barred Owls produce juvenile 'whoop' calls and group caterwauling that mimics primate troops, while Coyotes utilize complex yip-harmonic transitions."
-    )
-    
-    col_bio1, col_bio2 = st.columns([1, 1])
-    
-    with col_bio1:
-        st.subheader("📍 Active Target Location Bio-Profile")
-        st.write(f"**Current Search Zone:** {loc_name}")
-        st.write(f"**Coordinates:** `{lat:.4f}, {lon:.4f}`")
-        
-        st.markdown("#### Primary Regional Vocalizers to Cross-Reference")
-        st.markdown("""
-        * **Raptors & Owls:**
-          * *Barred Owl:* Full range includes 8-accented calls, juvenile beggars, throat-whoops, and chaotic group duets/caterwauling.
-          * *Great Horned Owl:* Deep territorial hoots, guttural barks, high-pitched squawks.
-          * *Eastern Screech-Owl:* Tremolo whinnies and monotonic trills.
-        * **Canids & Predators:**
-          * *Eastern Coyote:* Solitary bark-howls, group yip-harmonics (often sounding like twice the pack size), challenge barks.
-          * *Red Fox / Gray Fox:* High-pitched vixen screams, raspy alarm barks, chatter calls.
-          * *Fisher Cat / Bobcat:* Screeching caterwauls, low grunts, raspy chittering.
-        * **Ungulates & Large Mammals:**
-          * *White-Tailed Deer:* High-pressure alarm snorts/blows, wheezes, juvenile grunts.
-          * *Black Bear:* Guttural huffs, jaw-pops, woofs, and cub crying sounds.
-        """)
-# ==========================================
-# 8.5 HABITAT SUITABILITY INTELLIGENCE PANEL
-# ==========================================
-st.markdown("---")
-with st.expander("🚨 Automated Habitat Hotspot Breakdown (Terrain & Cover Metrics)", expanded=False):
+with st.expander("🚨 Automated Habitat Hotspot Breakdown (Terrain & Cover Metrics)", expanded=True):
     col_hs1, col_hs2, col_hs3 = st.columns(3)
     
     with col_hs1:
-        st.metric("Habitat Suitability Rating", f"{suitability_score}%", delta="High Potential Cover Zone")
+        st.metric("Habitat Suitability Index", f"{suitability_score}%", delta="High Cover Potential")
         st.caption("Calculated using spatial proximity to water bodies, canopy density, and relief corridors.")
         
     with col_hs2:
@@ -671,64 +396,40 @@ with st.expander("🚨 Automated Habitat Hotspot Breakdown (Terrain & Cover Metr
         """)
         
     with col_hs3:
-        st.markdown("#### Field Recon Recommendation")
-        st.write(f"**Target Coordinates:** `{hotspot_lat:.4f}, {hotspot_lon:.4f}`")
+        st.markdown("#### Recon Targets")
+        st.write(f"**Calculated Hotspot Lat:** `{hotspot_lat:.4f}`")
+        st.write(f"**Calculated Hotspot Lon:** `{hotspot_lon:.4f}`")
         st.info("Prioritize game trail intersections, natural funnel bottlenecks, and ridge saddles within the 2-mile red halo.")
-    with col_bio2:
-        st.subheader("🔗 External Bioacoustic Databases")
-        st.caption("Query open-access sound archives filtered to native wildlife near your current coordinates:")
-        
-        macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
-        xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
-        
-        st.markdown(f"""
-        * [🔊 **Macaulay Library (Cornell Lab of Ornithology)**]({macaulay_url})
-          *Access complete behavioral audio suites, variation recordings, and spectrograms for birds and mammals.*
-        * [🌐 **Xeno-Canto Geographic Sound Database**]({xenocanto_url})
-          *Search community-contributed wildlife sound recordings near active field coordinates.*
-        """)
-        
-        st.markdown("---")
-        st.subheader("📊 Neutral Acoustic Diagnostic Checklist")
-        st.caption("Evaluate physical audio parameters prior to assigning species or origin hypothesis:")
-        
-        st.checkbox("Acoustic Cadence: Is the sound a single burst, or does it repeat at measured intervals?")
-        st.checkbox("Harmonic Resonance: Does the sound exhibit low-frequency reverberation through terrain/canopy?")
-        st.checkbox("Vocal Repertoire Check: Have you evaluated juvenile/duet calls for local owl or canid populations?")
-        st.checkbox("Environmental Echo: Are reflections off ledges or water bodies altering pitch perception?")
 
 # ==========================================
-# 9. OFFLINE FIELD TOOLS & EXPORT ENGINE
+# 8. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
 # ==========================================
 st.markdown("---")
-st.markdown("### 📡 Offline Field Export & Backcountry Tools")
+with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine", expanded=False):
+    st.caption("Cross-reference field audio against native regional wildlife vocal repertoires before logging anomalous acoustic events.")
+    st.warning("**Field Science Note on Vocal Spectrum:** Native species possess extensive vocal ranges often mistaken for anomalous sounds (e.g. Barred Owl juvenile caterwauling or Coyote yip-harmonics).")
+    
+    col_bio1, col_bio2 = st.columns([1, 1])
+    with col_bio1:
+        st.subheader("📍 Target Bio-Profile")
+        st.write(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
+        st.markdown("""
+        * **Owls & Raptors:** Barred Owl (caterwauls, whoops), Great Horned Owl (deep hoots, barks), Eastern Screech-Owl.
+        * **Canids & Predators:** Eastern Coyote (yip-harmonics), Red/Gray Fox (screams, alarm barks), Bobcat / Fisher Cat.
+        * **Mammals:** White-Tailed Deer (alarm snorts), Black Bear (guttural huffs, jaw-pops).
+        """)
 
-col_exp_btn, col_disclaimer = st.columns([1, 2])
-
-with col_exp_btn:
-    gpx_data = generate_gpx(
-        lat, 
-        lon, 
-        loc_name, 
-        sightings_data if 'sightings_data' in locals() else [], 
-        camps_data if 'camps_data' in locals() else [], 
-        audio_data if 'audio_data' in locals() else [], 
-        community_logs_data if 'community_logs_data' in locals() else []
-    )
-    st.download_button(
-        label="📥 Download Active Area GPX Package",
-        data=gpx_data,
-        file_name=f"bigfoot_field_zone_{int(lat)}_{int(lon)}.gpx",
-        mime="application/gpx+xml",
-        use_container_width=True
-    )
-    st.caption("Compatible with Garmin BaseCamp, Gaia GPS, OnX Offroad, and handheld GPS units.")
-
-with col_disclaimer:
-    st.warning("**Backcountry Safety Notice:** This platform serves as a secondary spatial research engine. Always carry paper topographic maps, a compass, and dedicated navigation gear when heading off-grid.")
+    with col_bio2:
+        st.subheader("🔗 External Audio Databases")
+        macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
+        xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
+        st.markdown(f"""
+        * [🔊 **Macaulay Library (Cornell Lab)**]({macaulay_url})
+        * [🌐 **Xeno-Canto Geographic Database**]({xenocanto_url})
+        """)
 
 # ==========================================
-# 10. REGIONAL FIELD CONTEXT BELOW MAP
+# 9. MAIN SCREEN SECTION 3: FIELD CONTEXT & INTEL (LORE & PRESS)
 # ==========================================
 st.markdown("<div id='regional-panel'></div>", unsafe_allow_html=True)
 st.markdown("---")
@@ -748,16 +449,11 @@ with col_lore_btn:
 
 with col_media_btn:
     if local_media_records:
-        with st.expander(f"📰 Local Press & Archives ({len(local_media_records)})", expanded=True):
+        with st.expander(f"📰 Local Press Archives ({len(local_media_records)})", expanded=True):
             for media_item in local_media_records:
                 st.markdown(f"#### 📰 {media_item['title']}")
-                st.caption(f"**Publication:** {media_item['publication_name']} | **Date:** {media_item['pub_date']} | **Location:** {media_item['county']}, {media_item['state_province']}")
+                st.caption(f"**Publication:** {media_item['publication_name']} | **Date:** {media_item['pub_date']}")
                 st.write(f"**Transcript:** {media_item['full_text_transcript']}")
-                
-                img_url = media_item.get('image_url')
-                if img_url and str(img_url).startswith("http"):
-                    st.markdown(f"[🔗 View Original Article Record / Source Image]({img_url})")
-                
                 st.markdown("---")
     else:
         st.info("No historical press accounts tagged within 100 miles.")
@@ -769,3 +465,69 @@ with col_season_btn:
                 st.markdown(f"**{season_name}:** {count} reports")
         else:
             st.info("No dated sighting activity in this active search area.")
+
+# ==========================================
+# 10. MAIN SCREEN SECTION 4: INVESTIGATOR FIELD LOG
+# ==========================================
+st.markdown("---")
+with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
+    st.caption("Log field observations directly to your private vault or contribute unvetted data to the public layer.")
+    
+    with st.form("investigator_log_form", clear_on_submit=True):
+        visibility = st.radio("Log Storage Mode:", ["🔒 Private Vault (Only Me)", "🌐 Public Community Layer (Unvetted)"], horizontal=True)
+        is_public = True if "Public" in visibility else False
+
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            obs_type = st.selectbox("Nature of Evidence", ["Suspect Impression", "Potential Nesting / Matting Site", "Vegetation Disturbance", "Acoustic Event", "Visual Observation", "Biological Trace", "Environmental Anomaly"])
+        with col_f2:
+            obs_date = st.date_input("Observation Date", value=datetime.now())
+        with col_f3:
+            log_lat = st.number_input("Latitude", value=float(lat), format="%.5f")
+            log_lon = st.number_input("Longitude", value=float(lon), format="%.5f")
+
+        physical_notes = st.text_area("Hard Physical Facts Only", placeholder="Measurements, trail surface, scale markers used...")
+        field_narrative = st.text_area("Observer Conjecture & Narrative", placeholder="Subjective impressions, hypotheses...")
+        ethics_agree = st.checkbox("I certify this is an honest field record and agree to the Field Code of Ethics.")
+
+        submit_btn = st.form_submit_button("💾 Save Investigator Field Log", use_container_width=True)
+        if submit_btn and ethics_agree and supabase:
+            try:
+                log_payload = {
+                    "is_public": is_public, "observation_type": obs_type, "event_date": str(obs_date),
+                    "latitude": log_lat, "longitude": log_lon, "physical_evidence_notes": physical_notes,
+                    "field_narrative": field_narrative, "ethics_agreed": True
+                }
+                supabase.table("investigator_logs").insert(log_payload).execute()
+                st.success("Field log successfully recorded!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error saving log: {e}")
+
+# ==========================================
+# 11. MAIN SCREEN SECTION 5: OFFLINE FIELD EXPORT
+# ==========================================
+st.markdown("---")
+st.markdown("### 📡 Offline Field Export & Backcountry Tools")
+
+col_exp_btn, col_disclaimer = st.columns([1, 2])
+
+with col_exp_btn:
+    gpx_data = generate_gpx(
+        lat, lon, loc_name, 
+        sightings_data if 'sightings_data' in locals() else [], 
+        camps_data if 'camps_data' in locals() else [], 
+        audio_data if 'audio_data' in locals() else [], 
+        community_logs_data if 'community_logs_data' in locals() else []
+    )
+    st.download_button(
+        label="📥 Download Active Area GPX Package",
+        data=gpx_data,
+        file_name=f"bigfoot_field_zone_{int(lat)}_{int(lon)}.gpx",
+        mime="application/gpx+xml",
+        use_container_width=True
+    )
+    st.caption("Compatible with Garmin BaseCamp, Gaia GPS, OnX Offroad, and handheld units.")
+
+with col_disclaimer:
+    st.warning("**Backcountry Safety Notice:** Always carry analog topographic maps, a compass, and primary navigation gear when venturing off-grid.")
