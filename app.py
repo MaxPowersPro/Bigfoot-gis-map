@@ -398,29 +398,60 @@ map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
 st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
-# 7. MAIN SCREEN SECTION 1: AUTOMATED HOTSPOT BREAKDOWN
+# EXPANDED HABITAT & GREEN CORRIDOR ENGINE
 # ==========================================
-st.markdown("---")
-with st.expander("🚨 Automated Habitat Hotspot Breakdown (Terrain & Cover Metrics)", expanded=True):
-    col_hs1, col_hs2, col_hs3 = st.columns(3)
+def calculate_green_corridor_index(lat, lon, sightings, current_month):
+    # 1. Base Seasonal Canopy Multiplier
+    # Months 5-9 (May-Sept): High deciduous leaf-out
+    # Months 11-3 (Nov-March): Low deciduous, heavy reliance on Evergreen/Laurel
+    is_leaf_on = current_month in [5, 6, 7, 8, 9]
+    deciduous_cover_weight = 0.90 if is_leaf_on else 0.40
+    evergreen_laurel_weight = 0.85  # Constant year-round cover
+
+    # Composite Cover Rating
+    seasonal_cover_score = max(deciduous_cover_weight, evergreen_laurel_weight)
+
+    # 2. Cluster Density
+    density_score = min(len(sightings) * 3, 30)
+
+    # 3. Overall Green Corridor Index (GCI)
+    gci_score = int(50 + (seasonal_cover_score * 25) + density_score)
+    return min(gci_score, 98), is_leaf_on
+
+# Integrate into Section 6
+current_month = datetime.now().month
+gci_rating, leaf_status = calculate_green_corridor_index(lat, lon, sightings_data, current_month)
+
+if show_hotspots:
+    # Core Focal Hub (3-Mile Target Ring)
+    folium.Circle(
+        radius=4828,  # ~3 miles
+        location=[hotspot_lat, hotspot_lon],
+        color="#e74c3c",
+        weight=2,
+        fill=True,
+        fill_color="#e74c3c",
+        fill_opacity=0.2,
+        popup=f"Core Focal Hub ({gci_rating}% GCI Score)"
+    ).add_to(m)
+
+    # Extended Green Corridor Vector (20-Mile Regional Transit Axis)
+    corridor_points = [
+        [hotspot_lat - 0.12, hotspot_lon - 0.08],
+        [hotspot_lat - 0.05, hotspot_lon - 0.03],
+        [hotspot_lat, hotspot_lon],
+        [hotspot_lat + 0.06, hotspot_lon + 0.04],
+        [hotspot_lat + 0.14, hotspot_lon + 0.09]
+    ]
     
-    with col_hs1:
-        st.metric("Habitat Suitability Index", f"{suitability_score}%", delta="High Cover Potential")
-        st.caption("Calculated using spatial proximity to water bodies, canopy density, and relief corridors.")
-        
-    with col_hs2:
-        st.markdown("#### Key Environmental Drivers")
-        st.markdown("""
-        * **Hydrology Access:** Active drainage/stream within 1.2 miles.
-        * **Topographic Relief:** Steep ridge lines offering natural thermal buffers.
-        * **Canopy Integrity:** High forest continuity index.
-        """)
-        
-    with col_hs3:
-        st.markdown("#### Recon Targets")
-        st.write(f"**Calculated Hotspot Lat:** `{hotspot_lat:.4f}`")
-        st.write(f"**Calculated Hotspot Lon:** `{hotspot_lon:.4f}`")
-        st.info("Prioritize game trail intersections, natural funnel bottlenecks, and ridge saddles within the 2-mile red halo.")
+    folium.PolyLine(
+        corridor_points,
+        color="#27ae60",
+        weight=6,
+        opacity=0.6,
+        dash_array="10, 10",
+        popup="🌲 Regional Green Corridor Transit Axis (~25 Miles)"
+    ).add_to(m)
 
 # ==========================================
 # 8. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
