@@ -52,6 +52,12 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
+def apply_jitter(lat_val, lon_val, offset_seed=0):
+    random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
+    lat_jitter = lat_val + random.uniform(-0.003, 0.003)
+    lon_jitter = lon_val + random.uniform(-0.003, 0.003)
+    return lat_jitter, lon_jitter
+
 def get_season(date_str):
     if not date_str or date_str == 'N/A':
         return 'Unknown'
@@ -187,6 +193,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
     
+    show_bfro = st.checkbox("👣 Sightings (Blue/Purple)", value=True)
     show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
     show_news = st.checkbox("📰 Regional Press Net", value=True)
     show_user_logs = st.checkbox("⚠️ Community Logs (Green/Amber)", value=True)
@@ -284,17 +291,53 @@ m = folium.Map(
 folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_color="#e74c3c", fill_opacity=0.03).add_to(m)
 folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
 
-# LAYER 1: CAMPSITES
+# LAYER 1: SIGHTINGS (BIOLOGICAL VS. ANOMALOUS PINS)
+if show_bfro and sightings_data:
+    for report in sightings_data:
+        raw_id = str(report.get('report_id', '')).strip()
+        source = report.get('source', 'BFRO')
+        class_rating = str(report.get('class_rating', 'Class A')).upper()
+
+        if source == 'BFRO' and raw_id.isdigit() and len(raw_id) >= 3:
+            full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
+            link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Direct BFRO Report #{raw_id}</a>'
+        else:
+            link_html = ''
+
+        is_anomalous = "CLASS C" in class_rating or "ANOMALOUS" in class_rating
+        pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
+        pin_label = "🔮 Anomalous Sighting" if is_anomalous else "👣 Biological Sighting"
+
+        popup_content = f"""
+        <div style="font-family: sans-serif; width: 220px;">
+            <b style="color:{pin_color};">{pin_label}</b><br>
+            <small><b>Title:</b> {report.get('title', 'Report')} | <b>Class:</b> {class_rating}</small><br>
+            <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
+            {link_html}
+        </div>
+        """
+
+        j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
+        pin_html = f"""<div style="background-color: {pin_color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
+
+        folium.Marker(
+            [j_lat, j_lon],
+            popup=folium.Popup(popup_content, max_width=250),
+            icon=folium.DivIcon(html=pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
+            z_index_offset=500
+        ).add_to(m)
+
+# LAYER 2: CAMPSITES
 for camp in camps_data:
     camp_popup = f"""<div style="font-family: sans-serif; width: 210px;"><b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br><small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br><p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p></div>"""
     folium.Marker([camp["latitude"], camp["longitude"]], popup=folium.Popup(camp_popup, max_width=230), icon=folium.Icon(color="green", icon="campground", prefix="fa"), z_index_offset=400).add_to(m)
 
-# LAYER 2: INFRASOUND / ACOUSTIC
+# LAYER 3: INFRASOUND / ACOUSTIC
 for audio in audio_data:
     audio_popup = f"""<div style="font-family: sans-serif; width: 220px;"><b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br><small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br><p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p></div>"""
     folium.Marker([audio["latitude"], audio["longitude"]], popup=folium.Popup(audio_popup, max_width=240), icon=folium.Icon(color="purple", icon="microphone", prefix="fa"), z_index_offset=600).add_to(m)
 
-# LAYER 3: COMMUNITY FIELD LOGS
+# LAYER 4: COMMUNITY FIELD LOGS
 for ulog in community_logs_data:
     has_physical_facts = bool(ulog.get('physical_evidence_notes') and len(ulog.get('physical_evidence_notes').strip()) > 5)
     icon_color = "green" if has_physical_facts else "orange"
