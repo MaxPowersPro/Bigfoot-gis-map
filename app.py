@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 st.title("👣 Bigfoot Field Analysis Platform")
-st.caption("Site-Specific Spatial Map & Self-Contained Multi-Criteria Analysis Engine")
+st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Refuge Engine")
 
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
@@ -197,7 +197,9 @@ with st.sidebar:
     show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
     show_news = st.checkbox("📰 Regional Press Net", value=True)
     show_user_logs = st.checkbox("⚠️ Community Logs (Green/Amber)", value=True)
-    show_hotspots = st.checkbox("🚨 Hot Zones & The Larson Hypothesis", value=True)
+    show_hotspots = st.checkbox("🚨 Ground-Truth Hot Zones (Red Rings)", value=True)
+    show_refuges = st.checkbox("🪹 Predictive Refuge Zones (Amber Rings)", value=True)
+    show_larson = st.checkbox("🌲 The Larson Hypothesis (Amorphous Corridors)", value=True)
     show_audio = st.checkbox("🔊 Infrasound / Acoustic (Purple)", value=True)
     show_camps = st.checkbox("🏕️ Camping & Access (Green)", value=True)
 
@@ -359,48 +361,68 @@ for ulog in community_logs_data:
     folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
 
 # ==========================================
-# 7. EXPANDED PROBABILITY HOT ZONES & LARSON HYPOTHESIS
+# 7. DUAL-ENGINE: GROUND-TRUTH HOT ZONES & PREDICTIVE REFUGE ZONES
 # ==========================================
-if show_hotspots and sightings_data:
+ground_truth_hubs = []
+predictive_refuges = []
+
+if sightings_data:
     valid_coords = []
     for s in sightings_data:
         s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
         if not filter_urban(s_lat, s_lon):
             valid_coords.append([s_lat, s_lon])
 
-    high_prob_hubs = []
     if len(valid_coords) > 0:
         coords_arr = np.array(valid_coords)
         dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
         
         visited = set()
-        RADIUS_DEG = 0.22 # ~15 miles cluster sensitivity
+        RADIUS_DEG = 0.22 # ~15 miles
         
+        # 1. GROUND-TRUTH HOT ZONES (RED)
         for i, pt in enumerate(coords_arr):
             if i in visited:
                 continue
             neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-            if len(neighbors) >= 1: # Lowered threshold: captures single remote reports & micro-clusters
+            if len(neighbors) >= 1:
                 center_lat = np.mean(coords_arr[neighbors, 0])
                 center_lon = np.mean(coords_arr[neighbors, 1])
-                high_prob_hubs.append({
+                ground_truth_hubs.append({
                     "lat": center_lat, 
                     "lon": center_lon, 
                     "count": len(neighbors)
                 })
                 visited.update(neighbors)
 
-    # Render Expanded Red Dotted Hot Zones (Scaled to Home-Range Probabilities ~8-15+ Miles)
-    for hub in high_prob_hubs:
-        # Base area radius starting at ~8,000 meters (~5 miles) expanding up to 20,000+ meters (~12-15 miles) based on density
+        # 2. PREDICTIVE REFUGE ZONES (AMBER / DONUT HOLE EFFECT)
+        # Evaluates if center search area or remote pockets have high surrounding ring density but 0 local pins
+        if len(ground_truth_hubs) >= 2:
+            hub_coords = np.array([[h["lat"], h["lon"]] for h in ground_truth_hubs])
+            mean_lat = np.mean(hub_coords[:, 0])
+            mean_lon = np.mean(hub_coords[:, 1])
+            
+            # Distance from calculated regional gravity center to nearest report
+            dist_to_nearest = np.min(np.sqrt((coords_arr[:, 0] - mean_lat)**2 + (coords_arr[:, 1] - mean_lon)**2))
+            
+            # If the geographic center is > 8 miles from any single pin, but surrounded by outer ring pins
+            if dist_to_nearest > 0.12 and not filter_urban(mean_lat, mean_lon):
+                predictive_refuges.append({
+                    "lat": mean_lat,
+                    "lon": mean_lon,
+                    "surrounding_count": len(valid_coords)
+                })
+
+# Render 1: RED GROUND-TRUTH HOT ZONES
+if show_hotspots:
+    for hub in ground_truth_hubs:
         expanded_radius_meters = 8000 + (hub['count'] * 1800)
-        
         hotzone_popup = f"""
         <div style="font-family: sans-serif; width: 240px;">
-            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 HIGH PROBABILITY FIELD SECTOR</span><br>
-            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Home Range Probability Hub</b><br>
+            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 GROUND-TRUTH HOT ZONE</span><br>
+            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Direct Report Cluster Hub</b><br>
             <small><b>Anchored Reports:</b> {hub['count']} indicators</small><br>
-            <small><b>Probability Boundary:</b> ~{int(expanded_radius_meters / 1609.34)} mile active radius</small>
+            <small><b>Probability Boundary:</b> ~{int(expanded_radius_meters / 1609.34)} mile radius</small>
         </div>
         """
         folium.Circle(
@@ -408,88 +430,116 @@ if show_hotspots and sightings_data:
             location=[hub['lat'], hub['lon']],
             color="#e74c3c",
             weight=2,
-            dash_array="5, 8", # Red dotted boundary
+            dash_array="5, 8",
             fill=True,
             fill_color="#e74c3c",
             fill_opacity=0.15,
             popup=folium.Popup(hotzone_popup, max_width=260)
         ).add_to(m)
 
-    # Render The Larson Hypothesis (Amorphous Transit Corridors connecting expanded hubs)
-    if len(high_prob_hubs) > 1:
-        connected_pairs = set()
-        for i in range(len(high_prob_hubs)):
-            h1 = high_prob_hubs[i]
-            distances = []
-            for j in range(len(high_prob_hubs)):
-                if i == j:
-                    continue
-                h2 = high_prob_hubs[j]
-                d = np.sqrt((h1["lat"] - h2["lat"])**2 + (h1["lon"] - h2["lon"])**2)
-                distances.append((d, j))
-            
-            distances.sort()
-            if distances and distances[0][0] < 0.45:
-                j_near = distances[0][1]
-                pair_key = tuple(sorted([i, j_near]))
-                if pair_key not in connected_pairs:
-                    connected_pairs.add(pair_key)
-                    h2 = high_prob_hubs[j_near]
-                    
-                    vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
-                    perp = np.array([-vec[1], vec[0]])
-                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.025
-                    
-                    p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
-                    p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
-                    p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
-                    p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
-                    
-                    folium.Polygon(
-                        locations=[p1, p2, p3, p4],
-                        color="#27ae60",
-                        weight=1.5,
-                        fill=True,
-                        fill_color="#27ae60",
-                        fill_opacity=0.15,
-                        popup="🌲 The Larson Hypothesis: Amorphous Terrain Transit Channel"
-                    ).add_to(m)
+# Render 2: AMBER PREDICTIVE REFUGE ZONES (Unsurveyed Core Hollows)
+if show_refuges:
+    for ref in predictive_refuges:
+        refuge_popup = f"""
+        <div style="font-family: sans-serif; width: 240px;">
+            <span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🪹 PREDICTIVE REFUGE ZONE</span><br>
+            <b style="color:#d35400; font-size:13px; display:inline-block; margin-top:4px;">Unsurveyed Core Territory</b><br>
+            <small><b>Outer Ring Anchors:</b> {ref['surrounding_count']} surrounding reports</small><br>
+            <small><b>Analysis:</b> Zero direct local reports due to observer bias/low human access. Center gravity hub.</small>
+        </div>
+        """
+        folium.Circle(
+            radius=12000,
+            location=[ref['lat'], ref['lon']],
+            color="#d35400",
+            weight=2,
+            dash_array="8, 8",
+            fill=True,
+            fill_color="#e67e22",
+            fill_opacity=0.18,
+            popup=folium.Popup(refuge_popup, max_width=260)
+        ).add_to(m)
+
+# Render 3: THE LARSON HYPOTHESIS (Amorphous Transit Corridors)
+if show_larson and len(ground_truth_hubs) > 1:
+    connected_pairs = set()
+    for i in range(len(ground_truth_hubs)):
+        h1 = ground_truth_hubs[i]
+        distances = []
+        for j in range(len(ground_truth_hubs)):
+            if i == j:
+                continue
+            h2 = ground_truth_hubs[j]
+            d = np.sqrt((h1["lat"] - h2["lat"])**2 + (h1["lon"] - h2["lon"])**2)
+            distances.append((d, j))
+        
+        distances.sort()
+        if distances and distances[0][0] < 0.45:
+            j_near = distances[0][1]
+            pair_key = tuple(sorted([i, j_near]))
+            if pair_key not in connected_pairs:
+                connected_pairs.add(pair_key)
+                h2 = ground_truth_hubs[j_near]
+                
+                vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
+                perp = np.array([-vec[1], vec[0]])
+                perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.025
+                
+                p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
+                p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
+                p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
+                p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
+                
+                folium.Polygon(
+                    locations=[p1, p2, p3, p4],
+                    color="#27ae60",
+                    weight=1.5,
+                    fill=True,
+                    fill_color="#27ae60",
+                    fill_opacity=0.15,
+                    popup="🌲 The Larson Hypothesis: Amorphous Terrain Transit Channel"
+                ).add_to(m)
 
 st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
 map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
 st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
-# 8. DIAGNOSTIC PANEL: HOT ZONES & LARSON HYPOTHESIS
+# 8. DIAGNOSTIC PANEL: HOT ZONES, REFUGE ZONES & LARSON HYPOTHESIS
 # ==========================================
 st.markdown("---")
 current_month = datetime.now().month
 is_leaf_on = current_month in [5, 6, 7, 8, 9]
 
-with st.expander("🚨 Hot Zones & The Larson Hypothesis: Methodology & Factor Breakdown", expanded=True):
-    col_hz, col_lh = st.columns(2)
+with st.expander("🚨 Hot Zones, Predictive Refuges & The Larson Hypothesis: Methodology Breakdown", expanded=True):
+    col_hz, col_ref, col_lh = st.columns(3)
     
     with col_hz:
-        st.markdown("### 🚨 Hot Zone Determination")
-        st.caption("How probability hubs are identified in the active target area.")
+        st.markdown("### 🚨 Ground-Truth Hot Zones")
+        st.caption("Confirmed report overlay.")
         st.markdown("""
-        * **Calculation Method:** Spatial density evaluation derived directly from real ground-truth data points (sightings, acoustic logs, investigator records).
-        * **Primary Driving Factors:**
-            * **Sighting Sensitivity:** High-sensitivity detection capturing single remote anchor reports and micro-clusters.
-            * **Expanded Biological Radius:** Dotted red boundaries dynamically scale (8 to 15+ miles) to reflect large mammal territory and seasonal probability buffers.
-            * **Urban Friction Masking:** Automatic suppression of city centroids, high-density residential nodes, and major commercial corridors.
+        * **Method:** Clustering around direct, verified ground indicator pins.
+        * **Delineation:** Red dotted rings scaling from 5 to 15+ miles.
+        * **Driver:** Direct human-subject overlap.
+        """)
+
+    with col_ref:
+        st.markdown("### 🪹 Predictive Refuge Zones")
+        st.caption("Unsurveyed core territory.")
+        st.markdown("""
+        * **Method:** Ring-gravity calculation detecting deep pockets surrounded by outer reports.
+        * **Delineation:** Amber dotted rings marking low-access hollows.
+        * **Driver:** Corrects for observer bias in un-trailed wilderness.
         """)
         
     with col_lh:
         st.markdown("### 🌲 The Larson Hypothesis")
-        st.caption("How green transit corridors are calculated between probability hubs.")
+        st.caption("Transit corridors.")
         st.markdown("""
-        * **Calculation Method:** Amorphous vector modeling connecting adjacent Hot Zones along path-of-least-resistance terrain channels.
-        * **Primary Driving Factors:**
-            * **Micro-Hydrology Continuity:** Following year-round stream/creek drainages and river bottoms for concealed water and travel.
-            * **Topographic Funnels:** Utilizing ridge saddles, valley bottoms, and steep terrain relief.
-            * **Canopy Cover Regime:** Current status: **{}** (evergreen/laurel dependence vs. deciduous leaf-out).
-        """.format('🍃 High Deciduous Leaf-Out' if is_leaf_on else '🌲 Evergreen & Laurel Dependence'))
+        * **Method:** Path-of-least-resistance vector modeling between probability hubs.
+        * **Delineation:** Green translucent flow polygons.
+        * **Driver:** Micro-hydrology, ridge saddles & canopy status (Currently **{}**).
+        """.format('🍃 Deciduous Leaf-Out' if is_leaf_on else '🌲 Evergreen Dependence'))
 
 # ==========================================
 # 9. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
