@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 st.title("👣 Bigfoot Field Analysis Platform")
-st.caption("Site-Specific Spatial Map & Self-Contained Field Analysis Engine")
+st.caption("Site-Specific Spatial Map & Self-Contained Multi-Criteria Analysis Engine")
 
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
@@ -35,7 +35,7 @@ lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# 2. SUPABASE CLOUD CONNECTION
+# 2. SUPABASE CLOUD CONNECTION & UTILITIES
 # ==========================================
 @st.cache_resource
 def init_supabase():
@@ -51,12 +51,6 @@ def init_supabase():
         return None
 
 supabase: Client = init_supabase()
-
-def apply_jitter(lat_val, lon_val, offset_seed=0):
-    random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
-    lat_jitter = lat_val + random.uniform(-0.003, 0.003)
-    lon_jitter = lon_val + random.uniform(-0.003, 0.003)
-    return lat_jitter, lon_jitter
 
 def get_season(date_str):
     if not date_str or date_str == 'N/A':
@@ -75,8 +69,12 @@ def get_season(date_str):
         return 'Unknown'
 
 def filter_urban(check_lat, check_lon):
+    """Suppresses high-density human infrastructure nodes and suburban centroids."""
     urban_bounds = [
         {"min_lat": 35.5, "max_lat": 35.7, "min_lon": -82.65, "max_lon": -82.45}, # Asheville, NC
+        {"min_lat": 27.8, "max_lat": 28.1, "min_lon": -82.55, "max_lon": -82.30}, # Tampa Suburbs, FL
+        {"min_lat": 28.4, "max_lat": 28.65, "min_lon": -81.50, "max_lon": -81.20}, # Orlando Core, FL
+        {"min_lat": 38.0, "max_lat": 38.2, "min_lon": -84.6, "max_lon": -84.4},   # Lexington urban fringe, KY
     ]
     for b in urban_bounds:
         if b["min_lat"] <= check_lat <= b["max_lat"] and b["min_lon"] <= check_lon <= b["max_lon"]:
@@ -189,11 +187,10 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
     
-    show_bfro = st.checkbox("👣 Sightings (Blue/Purple)", value=True)
     show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
     show_news = st.checkbox("📰 Regional Press Net", value=True)
     show_user_logs = st.checkbox("⚠️ Community Logs (Green/Amber)", value=True)
-    show_larson = st.checkbox("🌲 The Larson Hypothesis (Amorphous Corridors)", value=True)
+    show_hotspots = st.checkbox("🚨 Hot Zones & The Larson Hypothesis", value=True)
     show_audio = st.checkbox("🔊 Infrasound / Acoustic (Purple)", value=True)
     show_camps = st.checkbox("🏕️ Camping & Access (Green)", value=True)
 
@@ -202,16 +199,19 @@ lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# 5. DATA RETRIEVAL & DEDUPLICATION
+# 5. DATA RETRIEVAL
 # ==========================================
 sightings_data = []
 seasonal_breakdown = {}
-if show_bfro and supabase:
+if supabase:
     try:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
         resp = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
         sightings_data = resp.data or []
+        for s in sightings_data:
+            season = get_season(s.get('event_date', 'N/A'))
+            seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
     except Exception:
         pass
 
@@ -280,59 +280,21 @@ m = folium.Map(
     attr="OpenTopoMap"
 )
 
-folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_color="#e74c3c", fill_opacity=0.05).add_to(m)
-folium.Circle(radius=100 * 1609.34, location=[lat, lon], color="#34495e", weight=1.5, dash_array="5, 8", fill=False).add_to(m)
+# Search Radius Boundary & Center Target Beacon Pin
+folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_color="#e74c3c", fill_opacity=0.03).add_to(m)
+folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
 
-# LAYER 1: SIGHTINGS (BIOLOGICAL VS. ANOMALOUS)
-for report in sightings_data:
-    raw_id = str(report.get('report_id', '')).strip()
-    source = report.get('source', 'BFRO')
-    event_date = report.get('event_date', 'N/A')
-    class_rating = str(report.get('class_rating', 'Class A')).upper()
-
-    season = get_season(event_date)
-    seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
-
-    if source == 'BFRO' and raw_id.isdigit() and len(raw_id) >= 3:
-        full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
-        link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Direct BFRO Report #{raw_id}</a>'
-    else:
-        link_html = ''
-
-    is_anomalous = "CLASS C" in class_rating or "ANOMALOUS" in class_rating
-    pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
-    pin_label = "🔮 Anomalous Sighting" if is_anomalous else "👣 Biological Sighting"
-
-    popup_content = f"""
-    <div style="font-family: sans-serif; width: 220px;">
-        <b style="color:{pin_color};">{pin_label}</b><br>
-        <small><b>Title:</b> {report.get('title', 'Report')} | <b>Class:</b> {class_rating}</small><br>
-        <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
-        {link_html}
-    </div>
-    """
-
-    j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-    pin_html = f"""<div style="background-color: {pin_color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
-
-    folium.Marker(
-        [j_lat, j_lon],
-        popup=folium.Popup(popup_content, max_width=250),
-        icon=folium.DivIcon(html=pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
-        z_index_offset=500
-    ).add_to(m)
-
-# LAYER 2: CAMPSITES
+# LAYER 1: CAMPSITES
 for camp in camps_data:
     camp_popup = f"""<div style="font-family: sans-serif; width: 210px;"><b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br><small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br><p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p></div>"""
     folium.Marker([camp["latitude"], camp["longitude"]], popup=folium.Popup(camp_popup, max_width=230), icon=folium.Icon(color="green", icon="campground", prefix="fa"), z_index_offset=400).add_to(m)
 
-# LAYER 3: INFRASOUND / ACOUSTIC
+# LAYER 2: INFRASOUND / ACOUSTIC
 for audio in audio_data:
     audio_popup = f"""<div style="font-family: sans-serif; width: 220px;"><b style="color:#8e44ad;">🔊 {audio.get('event_type', 'Acoustic Observation')}</b><br><small><b>Frequency:</b> {audio.get('frequency_hz', 'Low Hz')} | <b>Date:</b> {audio.get('event_date', 'N/A')}</small><br><p style="font-size: 11px; margin-top: 4px;">{audio.get('notes', 'Acoustic/Infrasound anomaly logged.')}</p></div>"""
     folium.Marker([audio["latitude"], audio["longitude"]], popup=folium.Popup(audio_popup, max_width=240), icon=folium.Icon(color="purple", icon="microphone", prefix="fa"), z_index_offset=600).add_to(m)
 
-# LAYER 4: COMMUNITY FIELD LOGS
+# LAYER 3: COMMUNITY FIELD LOGS
 for ulog in community_logs_data:
     has_physical_facts = bool(ulog.get('physical_evidence_notes') and len(ulog.get('physical_evidence_notes').strip()) > 5)
     icon_color = "green" if has_physical_facts else "orange"
@@ -353,79 +315,95 @@ for ulog in community_logs_data:
     """
     folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
 
-# LAYER 5: THE LARSON HYPOTHESIS & PROBABILITY HOT ZONES (PIN-FREE & URBAN MASKED)
-current_month = datetime.now().month
-is_leaf_on = current_month in [5, 6, 7, 8, 9]
+# ==========================================
+# 7. MULTI-CRITERIA EVALUATION (MCE) & LARSON HYPOTHESIS ENGINE
+# ==========================================
+if show_hotspots:
+    grid_lat_steps = np.linspace(lat - deg_delta, lat + deg_delta, 12)
+    grid_lon_steps = np.linspace(lon - deg_delta, lon + deg_delta, 12)
 
-valid_coords = []
-if sightings_data:
-    for s in sightings_data:
-        s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
-        if not filter_urban(s_lat, s_lon):
-            valid_coords.append([s_lat, s_lon])
+    high_prob_hubs = []
 
-density_boost = len(valid_coords) * 2
-canopy_weight = 25 if is_leaf_on else 12
-larson_index = min(50 + canopy_weight + density_boost, 98)
+    for glat in grid_lat_steps:
+        for glon in grid_lon_steps:
+            if filter_urban(glat, glon):
+                continue
+                
+            dist_to_center = np.sqrt((glat - lat)**2 + (glon - lon)**2)
+            env_score = max(0, 40 - (dist_to_center * 30))
+            
+            sightings_near = 0
+            for s in sightings_data:
+                s_dist = np.sqrt((glat - float(s["latitude"]))**2 + (glon - float(s["longitude"]))**2)
+                if s_dist < 0.18:
+                    sightings_near += 1
+                    
+            presence_score = sightings_near * 15
+            total_score = env_score + presence_score
+            
+            if total_score >= 45:
+                high_prob_hubs.append({"lat": glat, "lon": glon, "score": total_score, "sightings": sightings_near})
 
-if show_larson and len(valid_coords) >= 3:
-    coords_arr = np.array(valid_coords)
-    dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
-    
-    clusters = []
-    visited = set()
-    MIN_POINTS = 3
-    RADIUS_DEG = 0.25
-    
-    for i, pt in enumerate(coords_arr):
-        if i in visited:
-            continue
-        neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-        if len(neighbors) >= MIN_POINTS:
-            center_lat = np.mean(coords_arr[neighbors, 0])
-            center_lon = np.mean(coords_arr[neighbors, 1])
-            clusters.append({"lat": center_lat, "lon": center_lon, "count": len(neighbors)})
-            visited.update(neighbors)
-
-    # 1. Render Red Probability Hot Zone Circles (No individual pins)
-    for c in clusters:
-        hotzone_popup = f"""<div style="font-family: sans-serif; width: 230px;"><span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 PROBABILITY HOT ZONE</span><br><b style="color:#c0392b; font-size:14px; display:inline-block; margin-top:4px;">Larson Hypothesis Focal Hub</b><br><small><b>Indicator Density:</b> {c['count']} reports</small></div>"""
+    # Render Probability Hot Zones (Red Rings)
+    for hub in high_prob_hubs:
+        hotzone_popup = f"""
+        <div style="font-family: sans-serif; width: 230px;">
+            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 HIGH PROBABILITY TARGET ZONE</span><br>
+            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Multi-Criteria Suitability Hub</b><br>
+            <small><b>Calculated Suitability Score:</b> {int(hub['score'])}%</small><br>
+            <small><b>Local Sighting Density:</b> {hub['sightings']} reports</small>
+        </div>
+        """
         folium.Circle(
-            radius=4828 + (c['count'] * 500), 
-            location=[c['lat'], c['lon']], 
-            color="#e74c3c", 
-            weight=2, 
-            dash_array="4, 6", 
-            fill=True, 
-            fill_color="#e74c3c", 
-            fill_opacity=0.2,
+            radius=3500 + (hub['sightings'] * 400),
+            location=[hub['lat'], hub['lon']],
+            color="#e74c3c",
+            weight=2,
+            dash_array="4, 6",
+            fill=True,
+            fill_color="#e74c3c",
+            fill_opacity=0.18,
             popup=folium.Popup(hotzone_popup, max_width=250)
         ).add_to(m)
 
-    # 2. Render Amorphous Flow Corridors between active clusters
-    if len(clusters) > 1:
-        for i in range(len(clusters)):
-            for j in range(i + 1, len(clusters)):
-                c1, c2 = clusters[i], clusters[j]
-                d = np.sqrt((c1["lat"] - c2["lat"])**2 + (c1["lon"] - c2["lon"])**2)
-                if d < 1.5:
-                    vec = np.array([c2["lon"] - c1["lon"], c2["lat"] - c1["lat"]])
-                    perp = np.array([-vec[1], vec[0]])
-                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.04
+    # Render The Larson Hypothesis (Amorphous Green Flow Corridors)
+    if len(high_prob_hubs) > 1:
+        connected_pairs = set()
+        for i in range(len(high_prob_hubs)):
+            h1 = high_prob_hubs[i]
+            distances = []
+            for j in range(len(high_prob_hubs)):
+                if i == j:
+                    continue
+                h2 = high_prob_hubs[j]
+                d = np.sqrt((h1["lat"] - h2["lat"])**2 + (h1["lon"] - h2["lon"])**2)
+                distances.append((d, j))
+            
+            distances.sort()
+            if distances and distances[0][0] < 0.38:
+                j_near = distances[0][1]
+                pair_key = tuple(sorted([i, j_near]))
+                if pair_key not in connected_pairs:
+                    connected_pairs.add(pair_key)
+                    h2 = high_prob_hubs[j_near]
                     
-                    p1 = [c1["lat"] + perp[1], c1["lon"] + perp[0]]
-                    p2 = [c2["lat"] + perp[1], c2["lon"] + perp[0]]
-                    p3 = [c2["lat"] - perp[1], c2["lon"] - perp[0]]
-                    p4 = [c1["lat"] - perp[1], c1["lon"] - perp[0]]
+                    vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
+                    perp = np.array([-vec[1], vec[0]])
+                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.025
+                    
+                    p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
+                    p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
+                    p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
+                    p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
                     
                     folium.Polygon(
                         locations=[p1, p2, p3, p4],
                         color="#27ae60",
-                        weight=2,
+                        weight=1.5,
                         fill=True,
                         fill_color="#27ae60",
-                        fill_opacity=0.25,
-                        popup="🌲 The Larson Hypothesis: Amorphous Terrain Flow Corridor"
+                        fill_opacity=0.15,
+                        popup="🌲 The Larson Hypothesis: Amorphous Terrain Transit Channel"
                     ).add_to(m)
 
 st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic logs**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
@@ -433,10 +411,15 @@ map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
 st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
-# 7. MAIN SCREEN SECTION 1: HABITAT & LARSON HYPOTHESIS BREAKDOWN
+# 8. MAIN SCREEN SECTION 1: HABITAT & LARSON HYPOTHESIS BREAKDOWN
 # ==========================================
 st.markdown("---")
-with st.expander("🚨 The Larson Hypothesis: Landscape Connectivity & Flow Breakdown", expanded=True):
+current_month = datetime.now().month
+is_leaf_on = current_month in [5, 6, 7, 8, 9]
+canopy_weight = 25 if is_leaf_on else 12
+larson_index = min(50 + canopy_weight + (len(sightings_data) * 2), 98)
+
+with st.expander("🚨 Hot Zones & The Larson Hypothesis: Landscape Connectivity & Flow Breakdown", expanded=True):
     col_hs1, col_hs2, col_hs3 = st.columns(3)
     
     with col_hs1:
@@ -458,7 +441,7 @@ with st.expander("🚨 The Larson Hypothesis: Landscape Connectivity & Flow Brea
         st.info("Prioritize game trail funnel bottlenecks, drainage intersections, and ridge saddles along amorphous green flow channels.")
 
 # ==========================================
-# 8. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
+# 9. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
 # ==========================================
 st.markdown("---")
 with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine", expanded=False):
@@ -485,7 +468,7 @@ with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine", expanded=
         """)
 
 # ==========================================
-# 9. MAIN SCREEN SECTION 3: FIELD CONTEXT & INTEL (LORE & PRESS)
+# 10. MAIN SCREEN SECTION 3: FIELD CONTEXT & INTEL (LORE & PRESS)
 # ==========================================
 st.markdown("<div id='regional-panel'></div>", unsafe_allow_html=True)
 st.markdown("---")
@@ -523,7 +506,7 @@ with col_season_btn:
             st.info("No dated sighting activity in this active search area.")
 
 # ==========================================
-# 10. MAIN SCREEN SECTION 4: INVESTIGATOR FIELD LOG
+# 11. MAIN SCREEN SECTION 4: INVESTIGATOR FIELD LOG
 # ==========================================
 st.markdown("---")
 with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
@@ -561,7 +544,7 @@ with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)
                 st.error(f"Error saving log: {e}")
 
 # ==========================================
-# 11. MAIN SCREEN SECTION 5: OFFLINE FIELD EXPORT
+# 12. MAIN SCREEN SECTION 5: OFFLINE FIELD EXPORT
 # ==========================================
 st.markdown("---")
 st.markdown("### 📡 Offline Field Export & Backcountry Tools")
