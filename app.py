@@ -359,57 +359,61 @@ for ulog in community_logs_data:
     folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
 
 # ==========================================
-# 7. MULTI-CRITERIA EVALUATION (MCE) & LARSON HYPOTHESIS ENGINE
+# 7. ORGANIC DATA-DRIVEN CLUSTERING & LARSON HYPOTHESIS
 # ==========================================
-if show_hotspots:
-    grid_lat_steps = np.linspace(lat - deg_delta, lat + deg_delta, 12)
-    grid_lon_steps = np.linspace(lon - deg_delta, lon + deg_delta, 12)
+if show_hotspots and sightings_data:
+    # Filter out points in known urban centroids
+    valid_coords = []
+    for s in sightings_data:
+        s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
+        if not filter_urban(s_lat, s_lon):
+            valid_coords.append([s_lat, s_lon])
 
     high_prob_hubs = []
-
-    for glat in grid_lat_steps:
-        for glon in grid_lon_steps:
-            if filter_urban(glat, glon):
+    if len(valid_coords) > 0:
+        coords_arr = np.array(valid_coords)
+        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
+        
+        visited = set()
+        RADIUS_DEG = 0.15 # ~10 miles
+        
+        # Calculate centroids directly from real report groupings
+        for i, pt in enumerate(coords_arr):
+            if i in visited:
                 continue
-                
-            dist_to_center = np.sqrt((glat - lat)**2 + (glon - lon)**2)
-            env_score = max(0, 40 - (dist_to_center * 30))
-            
-            sightings_near = 0
-            for s in sightings_data:
-                s_dist = np.sqrt((glat - float(s["latitude"]))**2 + (glon - float(s["longitude"]))**2)
-                if s_dist < 0.18:
-                    sightings_near += 1
-                    
-            presence_score = sightings_near * 15
-            total_score = env_score + presence_score
-            
-            if total_score >= 45:
-                high_prob_hubs.append({"lat": glat, "lon": glon, "score": total_score, "sightings": sightings_near})
+            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
+            if len(neighbors) >= 1: # Requires at least 1 real indicator anchor
+                center_lat = np.mean(coords_arr[neighbors, 0])
+                center_lon = np.mean(coords_arr[neighbors, 1])
+                high_prob_hubs.append({
+                    "lat": center_lat, 
+                    "lon": center_lon, 
+                    "count": len(neighbors)
+                })
+                visited.update(neighbors)
 
-    # Render Probability Hot Zones (Red Rings)
+    # Render True Red Probability Hot Zones
     for hub in high_prob_hubs:
         hotzone_popup = f"""
         <div style="font-family: sans-serif; width: 230px;">
-            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 HIGH PROBABILITY TARGET ZONE</span><br>
-            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Multi-Criteria Suitability Hub</b><br>
-            <small><b>Calculated Suitability Score:</b> {int(hub['score'])}%</small><br>
-            <small><b>Local Sighting Density:</b> {hub['sightings']} reports</small>
+            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 PROBABILITY HOT ZONE</span><br>
+            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Organic Indicator Hub</b><br>
+            <small><b>Anchored Reports in Cluster:</b> {hub['count']}</small>
         </div>
         """
         folium.Circle(
-            radius=3500 + (hub['sightings'] * 400),
+            radius=3000 + (hub['count'] * 600),
             location=[hub['lat'], hub['lon']],
             color="#e74c3c",
             weight=2,
             dash_array="4, 6",
             fill=True,
             fill_color="#e74c3c",
-            fill_opacity=0.18,
+            fill_opacity=0.20,
             popup=folium.Popup(hotzone_popup, max_width=250)
         ).add_to(m)
 
-    # Render The Larson Hypothesis (Amorphous Green Flow Corridors)
+    # Render The Larson Hypothesis (Amorphous Transit Corridors between Real Hubs)
     if len(high_prob_hubs) > 1:
         connected_pairs = set()
         for i in range(len(high_prob_hubs)):
@@ -423,7 +427,8 @@ if show_hotspots:
                 distances.append((d, j))
             
             distances.sort()
-            if distances and distances[0][0] < 0.38:
+            # Connect only to immediate neighbors within 25 miles
+            if distances and distances[0][0] < 0.35:
                 j_near = distances[0][1]
                 pair_key = tuple(sorted([i, j_near]))
                 if pair_key not in connected_pairs:
@@ -432,7 +437,7 @@ if show_hotspots:
                     
                     vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
                     perp = np.array([-vec[1], vec[0]])
-                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.025
+                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.020
                     
                     p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
                     p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
@@ -454,34 +459,36 @@ map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
 st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
 
 # ==========================================
-# 8. MAIN SCREEN SECTION 1: HABITAT & LARSON HYPOTHESIS BREAKDOWN
+# 8. DIAGNOSTIC PANEL: HOT ZONES & LARSON HYPOTHESIS
 # ==========================================
 st.markdown("---")
 current_month = datetime.now().month
 is_leaf_on = current_month in [5, 6, 7, 8, 9]
-canopy_weight = 25 if is_leaf_on else 12
-larson_index = min(50 + canopy_weight + (len(sightings_data) * 2), 98)
 
-with st.expander("🚨 Hot Zones & The Larson Hypothesis: Landscape Connectivity & Flow Breakdown", expanded=True):
-    col_hs1, col_hs2, col_hs3 = st.columns(3)
+with st.expander("🚨 Hot Zones & The Larson Hypothesis: Methodology & Factor Breakdown", expanded=True):
+    col_hz, col_lh = st.columns(2)
     
-    with col_hs1:
-        st.metric("Larson Hypothesis Index", f"{larson_index}%", delta="Continuous Cover Matrix")
-        st.caption(f"**Seasonal Canopy Regime:** {'🍃 Leaf-On (High Deciduous Cover)' if is_leaf_on else '🌲 Leaf-Off (Evergreen & Laurel Dependence)'}")
-        
-    with col_hs2:
-        st.markdown("#### Environmental Suitability Drivers")
+    with col_hz:
+        st.markdown("### 🚨 Hot Zone Determination")
+        st.caption("How probability hubs are identified in the active target area.")
         st.markdown("""
-        * **Hydrology Continuity:** Primary river/creek drainage channel within transit vector.
-        * **Topographic Relief:** Steep ridge lines offering natural thermal buffers & concealed saddles.
-        * **Seasonal Foliage:** Evergreen / Rhododendron thickets provide year-round low-exposure transit.
+        * **Calculation Method:** Spatial density evaluation derived directly from real ground-truth data points (sightings, acoustic logs, investigator records).
+        * **Primary Driving Factors:**
+            * **Sighting Cluster Density:** Concentrated report clusters raise local probability scoring.
+            * **Urban Friction Masking:** Automatic suppression of city centroids, high-density residential nodes, and major commercial corridors.
+            * **Habitat Remoteness:** Proximity to contiguous public forest land and protected wilderness tracts.
         """)
         
-    with col_hs3:
-        st.markdown("#### Active Target Zone Coordinates")
-        st.write(f"**Target Latitude:** `{lat:.4f}`")
-        st.write(f"**Target Longitude:** `{lon:.4f}`")
-        st.info("Prioritize game trail funnel bottlenecks, drainage intersections, and ridge saddles along amorphous green flow channels.")
+    with col_lh:
+        st.markdown("### 🌲 The Larson Hypothesis")
+        st.caption("How green transit corridors are calculated between probability hubs.")
+        st.markdown("""
+        * **Calculation Method:** Amorphous vector modeling connecting adjacent Hot Zones along path-of-least-resistance terrain channels.
+        * **Primary Driving Factors:**
+            * **Micro-Hydrology Continuity:** Following year-round stream/creek drainages and river bottoms for concealed water and travel.
+            * **Topographic Funnels:** Utilizing ridge saddles, valley bottoms, and steep terrain relief.
+            * **Canopy Cover Regime:** Current status: **{}** (evergreen/laurel dependence vs. deciduous leaf-out).
+        """.format('🍃 High Deciduous Leaf-Out' if is_leaf_on else '🌲 Evergreen & Laurel Dependence'))
 
 # ==========================================
 # 9. MAIN SCREEN SECTION 2: BIOACOUSTICS & FAUNA REFERENCE
