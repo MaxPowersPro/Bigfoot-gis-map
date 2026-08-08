@@ -359,10 +359,9 @@ for ulog in community_logs_data:
     folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
 
 # ==========================================
-# 7. ORGANIC DATA-DRIVEN CLUSTERING & LARSON HYPOTHESIS
+# 7. EXPANDED PROBABILITY HOT ZONES & LARSON HYPOTHESIS
 # ==========================================
 if show_hotspots and sightings_data:
-    # Filter out points in known urban centroids
     valid_coords = []
     for s in sightings_data:
         s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
@@ -375,14 +374,13 @@ if show_hotspots and sightings_data:
         dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
         
         visited = set()
-        RADIUS_DEG = 0.15 # ~10 miles
+        RADIUS_DEG = 0.22 # ~15 miles cluster sensitivity
         
-        # Calculate centroids directly from real report groupings
         for i, pt in enumerate(coords_arr):
             if i in visited:
                 continue
             neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-            if len(neighbors) >= 1: # Requires at least 1 real indicator anchor
+            if len(neighbors) >= 1: # Lowered threshold: captures single remote reports & micro-clusters
                 center_lat = np.mean(coords_arr[neighbors, 0])
                 center_lon = np.mean(coords_arr[neighbors, 1])
                 high_prob_hubs.append({
@@ -392,28 +390,32 @@ if show_hotspots and sightings_data:
                 })
                 visited.update(neighbors)
 
-    # Render True Red Probability Hot Zones
+    # Render Expanded Red Dotted Hot Zones (Scaled to Home-Range Probabilities ~8-15+ Miles)
     for hub in high_prob_hubs:
+        # Base area radius starting at ~8,000 meters (~5 miles) expanding up to 20,000+ meters (~12-15 miles) based on density
+        expanded_radius_meters = 8000 + (hub['count'] * 1800)
+        
         hotzone_popup = f"""
-        <div style="font-family: sans-serif; width: 230px;">
-            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 PROBABILITY HOT ZONE</span><br>
-            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Organic Indicator Hub</b><br>
-            <small><b>Anchored Reports in Cluster:</b> {hub['count']}</small>
+        <div style="font-family: sans-serif; width: 240px;">
+            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 HIGH PROBABILITY FIELD SECTOR</span><br>
+            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Home Range Probability Hub</b><br>
+            <small><b>Anchored Reports:</b> {hub['count']} indicators</small><br>
+            <small><b>Probability Boundary:</b> ~{int(expanded_radius_meters / 1609.34)} mile active radius</small>
         </div>
         """
         folium.Circle(
-            radius=3000 + (hub['count'] * 600),
+            radius=expanded_radius_meters,
             location=[hub['lat'], hub['lon']],
             color="#e74c3c",
             weight=2,
-            dash_array="4, 6",
+            dash_array="5, 8", # Red dotted boundary
             fill=True,
             fill_color="#e74c3c",
-            fill_opacity=0.20,
-            popup=folium.Popup(hotzone_popup, max_width=250)
+            fill_opacity=0.15,
+            popup=folium.Popup(hotzone_popup, max_width=260)
         ).add_to(m)
 
-    # Render The Larson Hypothesis (Amorphous Transit Corridors between Real Hubs)
+    # Render The Larson Hypothesis (Amorphous Transit Corridors connecting expanded hubs)
     if len(high_prob_hubs) > 1:
         connected_pairs = set()
         for i in range(len(high_prob_hubs)):
@@ -427,8 +429,7 @@ if show_hotspots and sightings_data:
                 distances.append((d, j))
             
             distances.sort()
-            # Connect only to immediate neighbors within 25 miles
-            if distances and distances[0][0] < 0.35:
+            if distances and distances[0][0] < 0.45:
                 j_near = distances[0][1]
                 pair_key = tuple(sorted([i, j_near]))
                 if pair_key not in connected_pairs:
@@ -437,7 +438,7 @@ if show_hotspots and sightings_data:
                     
                     vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
                     perp = np.array([-vec[1], vec[0]])
-                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.020
+                    perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.025
                     
                     p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
                     p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
@@ -474,9 +475,9 @@ with st.expander("🚨 Hot Zones & The Larson Hypothesis: Methodology & Factor B
         st.markdown("""
         * **Calculation Method:** Spatial density evaluation derived directly from real ground-truth data points (sightings, acoustic logs, investigator records).
         * **Primary Driving Factors:**
-            * **Sighting Cluster Density:** Concentrated report clusters raise local probability scoring.
+            * **Sighting Sensitivity:** High-sensitivity detection capturing single remote anchor reports and micro-clusters.
+            * **Expanded Biological Radius:** Dotted red boundaries dynamically scale (8 to 15+ miles) to reflect large mammal territory and seasonal probability buffers.
             * **Urban Friction Masking:** Automatic suppression of city centroids, high-density residential nodes, and major commercial corridors.
-            * **Habitat Remoteness:** Proximity to contiguous public forest land and protected wilderness tracts.
         """)
         
     with col_lh:
