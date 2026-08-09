@@ -171,7 +171,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
-    show_bfro = st.checkbox("1. 👣 Sightings (Blue/Purple)", value=True)
+    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True)
     show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True)
     show_news = st.checkbox("3. 📰 Press Archives Net", value=True)
     show_hotspots = st.checkbox("4. 🚨 Hot Zones & The Larson Hypothesis", value=True)
@@ -263,7 +263,7 @@ with tab_map:
     folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_opacity=0.02).add_to(m)
     folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER: {loc_name}</b>", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
 
-    # 1. SIGHTINGS WITH FACT VS CONJECTURE BREAKDOWN
+    # 1. SIGHTINGS WITH DUAL FOOTPRINT ICONS & FACT/CONJECTURE BREAKDOWN
     if show_bfro and sightings_data:
         for s in sightings_data:
             j_lat, j_lon = apply_jitter(s["latitude"], s["longitude"], offset_seed=1)
@@ -274,7 +274,7 @@ with tab_map:
 
             popup_html = f"""
             <div style="font-family:sans-serif; width:250px;">
-                <b style="color:#2b78e4;">👣 {s.get('title', 'Sighting Report')}</b><br>
+                <b style="color:#2b78e4;">👣 👣 {s.get('title', 'Sighting Report')}</b><br>
                 <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>County:</b> {s.get('county', 'N/A')}, {s.get('state', '')}</small>
                 <hr style="margin:4px 0;">
                 <b style="color:#27ae60; font-size:11px;">📊 HARD PHYSICAL FACTS:</b>
@@ -284,7 +284,16 @@ with tab_map:
                 {link_html}
             </div>
             """
-            folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=270), icon=folium.Icon(color="blue", icon="footprint", prefix="fa")).add_to(m)
+            
+            # Dual Footprint Icon Marker
+            dual_footprint_html = """
+            <div style="font-size:16px; text-shadow:0 0 3px #ffffff;">👣</div>
+            """
+            folium.Marker(
+                [j_lat, j_lon], 
+                popup=folium.Popup(popup_html, max_width=270), 
+                icon=folium.DivIcon(html=dual_footprint_html, icon_size=(20, 20), icon_anchor=(10, 10))
+            ).add_to(m)
 
     # 2. HOT ZONES, PREDICTIVE REFUGES & THE LARSON HYPOTHESIS
     ground_truth_hubs = []
@@ -368,17 +377,15 @@ with tab_map:
     st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
     # ==========================================
-    # CONSOLIDATED SINGLE REGIONAL INTELLIGENCE DRAWER
+    # CONSOLIDATED INTEGRATED REGIONAL PANEL
     # ==========================================
     st.markdown("---")
     with st.expander("📊 Integrated Regional Intelligence & Field Diagnostics Panel", expanded=True):
-        panel_tab1, panel_tab2, panel_tab3, panel_tab4, panel_tab5, panel_tab6 = st.tabs([
+        panel_tab1, panel_tab2, panel_tab3, panel_tab4 = st.tabs([
             "🚨 Hot Zones & Larson Hypothesis", 
-            "🔊 Infrasound Physics", 
+            "🔊 Infrasound Physics & Formula", 
             "🦉 Bioacoustics", 
-            "🗂️ Regional Intel", 
-            "📝 Field Log", 
-            "📡 GPX Export"
+            "🗂️ Regional Intel"
         ])
 
         with panel_tab1:
@@ -407,20 +414,36 @@ with tab_map:
                 """)
 
         with panel_tab2:
-            st.markdown("### 📊 Infrasound Propagation Physics")
+            st.markdown("### 📊 Infrasound Attenuation Physics & Equation")
+            st.markdown(r"""
+            $$\Delta L = 20 \log_{10}\left(\frac{R}{R_0}\right) + \alpha R$$
+            """)
+            st.caption("Where **$\\alpha$** represents atmospheric absorption for sub-audible waves ($<20\\text{ Hz}$), which is nearly negligible ($\sim 0.001\\text{ dB/km}$). This allows heavy low-frequency producers to travel $40\\text{--}80+\\text{ miles}$ before dropping below the $0.1\\text{ Pa}$ ($\sim 74\\text{ dB SIL}$) threshold.")
+            
+            st.markdown("---")
+            st.markdown("### 🔊 Infrasound Categories & Physiological Effects")
             col_inf_def1, col_inf_def2, col_inf_def3 = st.columns(3)
             with col_inf_def1:
                 st.markdown("#### 🌬️ Aeolian Infrasound")
                 st.caption("Wind-Notch / Mountain Pass Waves")
-                st.markdown("* **Physics:** High-velocity wind funneling through narrow granite gaps generates standing waves ($0.5\text{--}7.0\text{ Hz}$) traveling $30\text{--}50\text{ miles}$.")
+                st.markdown("""
+                * **Physics:** High-velocity wind funneling through narrow granite gaps generates standing waves ($0.5\text{--}7.0\text{ Hz}$).
+                * **Human Symptoms:** Persistent low-level pressure feelings in the inner ear, micro-barometric headaches, unexplainable fatigue, and mild disorienting fullness.
+                """)
             with col_inf_def2:
                 st.markdown("#### 🌊 Hydrological Infrasound")
                 st.caption("Waterfalls, Rapids & Hydro Dams")
-                st.markdown("* **Physics:** Water impact at high-head falls ($>100\text{ ft}$) produces low-frequency hydraulic rumbles ($3.0\text{--}15.0\text{ Hz}$) traveling up to $80\text{ miles}$.")
+                st.markdown("""
+                * **Physics:** High-volume water impact produces low-frequency hydraulic rumbles ($3.0\text{--}15.0\text{ Hz}$) traveling up to $80\text{ miles}$.
+                * **Human Symptoms:** Auditory fatigue, masking of ambient forest soundscapes, and subtle ground-coupled mechanical vibrations felt through foot soles near river gorge bedrock.
+                """)
             with col_inf_def3:
                 st.markdown("#### 🦍 Biotic Infrasound")
                 st.caption("Biological Low-Hz Vocalization")
-                st.markdown("* **Physics:** Sub-audible vocal emissions ($8.0\text{--}18.0\text{ Hz}$) inducing inner-ear pressure changes and chest resonance.")
+                st.markdown("""
+                * **Physics:** Sub-audible vocal emissions ($8.0\text{--}18.0\text{ Hz}$) generated by massive respiratory structures.
+                * **Human Symptoms:** Sudden inner-ear pressure spikes, chest cavity resonance ($50\text{--}100\text{ Hz}$ sympathetic vibration), sudden onset of unaccountable apprehension, nausea, or hyper-vigilance.
+                """)
 
             st.markdown("---")
             st.markdown("### 🎧 Human Hearing Pitch-Shift Simulator")
@@ -470,41 +493,56 @@ with tab_map:
                 for season_name, count in seasonal_breakdown.items():
                     st.write(f"**{season_name}:** {count} reports")
 
-        with panel_tab5:
-            with st.form("investigator_log_form", clear_on_submit=True):
-                visibility = st.radio("Storage Mode:", ["🔒 Private Vault", "🌐 Public Community Layer"], horizontal=True)
-                obs_type = st.selectbox("Type", ["Suspect Impression", "Potential Nesting Site", "Vegetation Disturbance", "Acoustic Event", "Visual Observation"])
-                physical_notes = st.text_area("Hard Physical Facts", placeholder="Measurements, trackway depth, scale markers...")
-                field_narrative = st.text_area("Observer Conjecture & Narrative", placeholder="Hypothesis, perceived behavior...")
-                ethics_agree = st.checkbox("Certify as honest field record.")
-                if st.form_submit_button("💾 Save Field Log", use_container_width=True) and ethics_agree and supabase:
-                    try:
-                        supabase.table("investigator_logs").insert({
-                            "is_public": "Public" in visibility,
-                            "observation_type": obs_type,
-                            "event_date": str(datetime.now().date()),
-                            "latitude": lat,
-                            "longitude": lon,
-                            "physical_evidence_notes": physical_notes,
-                            "field_narrative": field_narrative,
-                            "ethics_agreed": True
-                        }).execute()
-                        st.success("Log saved!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+    # ==========================================
+    # THREE SEPARATE EXPANDABLE DRAWERS (IN ORDER)
+    # ==========================================
+    st.markdown("---")
 
-        with panel_tab6:
-            gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
-            st.download_button(
-                label="📥 Download Active Area GPX Package",
-                data=gpx_data,
-                file_name=f"bigfoot_field_zone_{int(lat)}_{int(lon)}.gpx",
-                mime="application/gpx+xml"
-            )
+    # DRAWER 1: INVESTIGATOR FIELD LOG
+    with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
+        with st.form("investigator_log_form", clear_on_submit=True):
+            visibility = st.radio("Storage Mode:", ["🔒 Private Vault", "🌐 Public Community Layer"], horizontal=True)
+            obs_type = st.selectbox("Type", ["Suspect Impression", "Potential Nesting Site", "Vegetation Disturbance", "Acoustic Event", "Visual Observation"])
+            physical_notes = st.text_area("Hard Physical Facts", placeholder="Measurements, trackway depth, scale markers...")
+            field_narrative = st.text_area("Observer Conjecture & Narrative", placeholder="Hypothesis, perceived behavior...")
+            ethics_agree = st.checkbox("Certify as honest field record.")
+            if st.form_submit_button("💾 Save Field Log", use_container_width=True) and ethics_agree and supabase:
+                try:
+                    supabase.table("investigator_logs").insert({
+                        "is_public": "Public" in visibility,
+                        "observation_type": obs_type,
+                        "event_date": str(datetime.now().date()),
+                        "latitude": lat,
+                        "longitude": lon,
+                        "physical_evidence_notes": physical_notes,
+                        "field_narrative": field_narrative,
+                        "ethics_agreed": True
+                    }).execute()
+                    st.success("Log saved!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # DRAWER 2: REGIONAL CAMPSITES & BACKCOUNTRY ACCESS
+    with st.expander("🏕️ Regional Campsites & Backcountry Access", expanded=False):
+        if camps_data:
+            for c in camps_data[:20]:
+                st.write(f"🏕️ **{c.get('name')}** | Type: `{c.get('type')}` | Coords: `{c.get('latitude')}, {c.get('longitude')}`")
+        else:
+            st.info("No campsites tagged in active sector radius.")
+
+    # DRAWER 3: OFFLINE FIELD EXPORT & GPX
+    with st.expander("📡 Offline Field Export & Backcountry Tools", expanded=False):
+        gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
+        st.download_button(
+            label="📥 Download Active Area GPX Package",
+            data=gpx_data,
+            file_name=f"bigfoot_field_zone_{int(lat)}_{int(lon)}.gpx",
+            mime="application/gpx+xml"
+        )
 
 # ==========================================
-# TAB 2: RESEARCH LIBRARY (FAUNA INSTEAD OF CAMPSITES)
+# TAB 2: RESEARCH LIBRARY
 # ==========================================
 with tab_library:
     st.subheader("📚 Curated Research Library & Source Vault")
