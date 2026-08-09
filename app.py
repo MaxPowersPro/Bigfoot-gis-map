@@ -180,7 +180,7 @@ with st.sidebar:
     show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
 
 # ==========================================
-# 5. TAB NAVIGATION & DATA RETRIEVAL (UNIVERSAL INTERSECTION PIPELINE)
+# 5. TAB NAVIGATION & DATA RETRIEVAL (WEIGHTED & INTERSECTING)
 # ==========================================
 tab_map, tab_library = st.tabs(["🗺️ Spatial Analysis Map", "📚 Curated Research Library"])
 
@@ -195,6 +195,7 @@ if supabase:
         r = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
         sightings_data = r.data or []
         for s in sightings_data:
+            s["evidence_weight"] = float(s.get("evidence_weight", 1.0))
             season = get_season(s.get('event_date', 'N/A'))
             seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
     except Exception: pass
@@ -212,16 +213,13 @@ if supabase:
             a_lat, a_lon = float(a["latitude"]), float(a["longitude"])
             e_type = a.get("event_type", "")
             
-            # Physics-based acoustic radius in miles
             prop_radius = 80 if "Niagara" in e_type else (60 if "Dam" in e_type or "Snoqualmie" in e_type else 45)
             a["prop_radius_miles"] = prop_radius
             
             dist_to_target = haversine_miles(lat, lon, a_lat, a_lon)
             a["dist_to_target"] = dist_to_target
             
-            # INTERSECTION CONDITION: Source OR its acoustic footprint touches search radius
             if dist_to_target <= (radius_miles + prop_radius):
-                # Calculate estimated sector coverage percentage
                 overlap_dist = (radius_miles + prop_radius) - dist_to_target
                 coverage_pct = min(100, int((overlap_dist / (radius_miles * 2)) * 100))
                 a["coverage_pct"] = max(10, coverage_pct)
@@ -231,7 +229,10 @@ if supabase:
 
     try:
         r = supabase.table("historical_media").select("*").execute()
-        media_data = r.data or []
+        raw_media = r.data or []
+        for m_item in raw_media:
+            m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
+            media_data.append(m_item)
     except Exception: pass
 
     try:
@@ -239,7 +240,7 @@ if supabase:
         user_logs_data = r.data or []
     except Exception: pass
 
-    # TRIBAL LORE GEOGRAPHIC INTERSECTION
+    # TRIBAL LORE GEOGRAPHIC INTERSECTION WITH WEIGHTING
     search_pt = Point(lon, lat)
     detected_tribes = []
     for t_name, poly in TRIBAL_BOUNDARIES.items():
@@ -249,10 +250,13 @@ if supabase:
     try:
         r = supabase.table("tribal_lore").select("*").execute()
         all_lore = r.data or []
+        for l_item in all_lore:
+            l_item["evidence_weight"] = float(l_item.get("evidence_weight", 1.5))
+            
         if detected_tribes:
             lore_data = [item for item in all_lore if any(dt.lower() in item.get('tribe_name', '').lower() for dt in detected_tribes)]
         else:
-            lore_data = all_lore[:3]
+            lore_data = all_lore[:5]
     except Exception: pass
 
 # ==========================================
@@ -286,7 +290,7 @@ with tab_map:
             popup_html = f"""
             <div style="font-family:sans-serif; width:250px;">
                 <b style="color:#2b78e4;">👣 👣 {s.get('title', 'Sighting Report')}</b><br>
-                <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>County:</b> {s.get('county', 'N/A')}, {s.get('state', '')}</small>
+                <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Weight:</b> {s.get('evidence_weight', 1.0)}x</small>
                 <hr style="margin:4px 0;">
                 <b style="color:#27ae60; font-size:11px;">📊 HARD PHYSICAL FACTS:</b>
                 <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px; border-left:3px solid #27ae60;">{raw_summary[:180]}...</p>
@@ -296,47 +300,58 @@ with tab_map:
             </div>
             """
             
-            dual_footprint_html = """
-            <div style="font-size:16px; text-shadow:0 0 3px #ffffff;">👣</div>
-            """
+            dual_footprint_html = """<div style="font-size:16px; text-shadow:0 0 3px #ffffff;">👣</div>"""
             folium.Marker(
                 [j_lat, j_lon], 
                 popup=folium.Popup(popup_html, max_width=270), 
                 icon=folium.DivIcon(html=dual_footprint_html, icon_size=(20, 20), icon_anchor=(10, 10))
             ).add_to(m)
 
-    # 2. HOT ZONES, PREDICTIVE REFUGES & THE LARSON HYPOTHESIS
+    # 2. WEIGHTED HOT ZONES, PREDICTIVE REFUGES & THE LARSON HYPOTHESIS
     ground_truth_hubs = []
     predictive_refuges = []
 
-    if show_hotspots and sightings_data:
-        valid_coords = [[float(s["latitude"]), float(s["longitude"])] for s in sightings_data if not filter_urban(float(s["latitude"]), float(s["longitude"]))]
-        if len(valid_coords) > 0:
-            coords_arr = np.array(valid_coords)
-            dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
-            visited = set()
-            RADIUS_DEG = 0.22 # ~15 miles
-            
-            for i, pt in enumerate(coords_arr):
-                if i in visited: continue
-                neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-                if len(neighbors) >= 1:
-                    center_lat = np.mean(coords_arr[neighbors, 0])
-                    center_lon = np.mean(coords_arr[neighbors, 1])
-                    ground_truth_hubs.append({"lat": center_lat, "lon": center_lon, "count": len(neighbors)})
-                    visited.update(neighbors)
+    # COMBINE ALL WEIGHTED EVIDENCE POINTS (SIGHTINGS + PRESS + INDIGENOUS LORE)
+    combined_evidence_points = []
+    if sightings_data:
+        for s in sightings_data:
+            if not filter_urban(float(s["latitude"]), float(s["longitude"])):
+                combined_evidence_points.append({"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0))})
 
-            if len(ground_truth_hubs) >= 2:
-                hub_coords = np.array([[h["lat"], h["lon"]] for h in ground_truth_hubs])
-                mean_lat, mean_lon = np.mean(hub_coords[:, 0]), np.mean(hub_coords[:, 1])
-                dist_to_nearest = np.min(np.sqrt((coords_arr[:, 0] - mean_lat)**2 + (coords_arr[:, 1] - mean_lon)**2))
-                if dist_to_nearest > 0.12 and not filter_urban(mean_lat, mean_lon):
-                    predictive_refuges.append({"lat": mean_lat, "lon": mean_lon, "surrounding_count": len(valid_coords)})
+    if media_data:
+        for m_item in media_data:
+            if not filter_urban(float(m_item["latitude"]), float(m_item["longitude"])):
+                combined_evidence_points.append({"lat": float(m_item["latitude"]), "lon": float(m_item["longitude"]), "weight": float(m_item.get("evidence_weight", 1.2))})
+
+    if show_hotspots and combined_evidence_points:
+        coords_arr = np.array([[pt["lat"], pt["lon"]] for pt in combined_evidence_points])
+        weights_arr = np.array([pt["weight"] for pt in combined_evidence_points])
+        
+        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
+        visited = set()
+        RADIUS_DEG = 0.22 # ~15 miles
+        
+        for i, pt in enumerate(coords_arr):
+            if i in visited: continue
+            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
+            if len(neighbors) >= 1:
+                cluster_weight = np.sum(weights_arr[neighbors])
+                center_lat = np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])
+                center_lon = np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])
+                ground_truth_hubs.append({"lat": center_lat, "lon": center_lon, "weight": cluster_weight, "count": len(neighbors)})
+                visited.update(neighbors)
+
+        if len(ground_truth_hubs) >= 2:
+            hub_coords = np.array([[h["lat"], h["lon"]] for h in ground_truth_hubs])
+            mean_lat, mean_lon = np.mean(hub_coords[:, 0]), np.mean(hub_coords[:, 1])
+            dist_to_nearest = np.min(np.sqrt((coords_arr[:, 0] - mean_lat)**2 + (coords_arr[:, 1] - mean_lon)**2))
+            if dist_to_nearest > 0.12 and not filter_urban(mean_lat, mean_lon):
+                predictive_refuges.append({"lat": mean_lat, "lon": mean_lon, "surrounding_weight": np.sum(weights_arr)})
 
         # Render 1: RED HOT ZONES
         for hub in ground_truth_hubs:
-            radius_m = 8000 + (hub['count'] * 1800)
-            folium.Circle(radius=radius_m, location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} anchored reports)").add_to(m)
+            radius_m = 8000 + (hub['weight'] * 1500)
+            folium.Circle(radius=radius_m, location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
 
         # Render 2: AMBER PREDICTIVE REFUGE ZONES
         for ref in predictive_refuges:
@@ -368,10 +383,8 @@ with tab_map:
         for a in audio_data:
             prop_m = a["prop_radius_miles"] * 1609.34
             off_str = f"<br><b style='color:#d35400;'>⚠️ Trans-Boundary Source: {int(a['dist_to_target'])} miles away ({a['coverage_pct']}% local sector coverage)</b>" if a.get("is_offscreen") else ""
-            
             a_popup = f"""<b>🔊 INFRASOUND GENERATOR</b><br><b>{a.get('event_type')}</b><br><small>Frequency: {a.get('frequency_hz')}</small><br><small>Physical Propagation: ~{a['prop_radius_miles']} miles</small>{off_str}<br><p style='font-size:10px; margin-top:4px;'>{a.get('notes')}</p>"""
             
-            # Draw pin only if within map canvas, but ALWAYS draw the propagation ring
             if not a.get("is_offscreen"):
                 folium.Marker([a["latitude"], a["longitude"]], popup=a_popup, icon=folium.Icon(color="purple", icon="volume-up", prefix="fa")).add_to(m)
             
@@ -418,10 +431,11 @@ with tab_map:
             col_hz, col_ref, col_lh = st.columns(3)
             with col_hz:
                 st.markdown("### 🚨 Hot Zones")
-                st.caption("Ecosystem carrying capacity & density hubs.")
+                st.caption("Ecosystem carrying capacity & weighted density hubs.")
                 st.markdown("""
+                * **Evidence Weighting:** Incorporates modern sightings ($1.0\\times$), historical press accounts ($1.2\\times$), and Indigenous land anchors ($1.5\\times$).
                 * **Sustaining Factors:** High-density report clusters serve as an ecological proxy for sector carrying capacity (contiguous canopy, deer/game corridors, year-round water sources).
-                * **Delineation:** Red dotted rings scaling from 5 to 15+ miles centered on report cluster hubs.
+                * **Delineation:** Red dotted rings scaling from 5 to 15+ miles centered on weighted cluster hubs.
                 * **Urban Filtering:** Automatically excludes paved urban zones unable to sustain large organisms.
                 """)
             with col_ref:
@@ -446,7 +460,6 @@ with tab_map:
             """)
             st.caption("Where **$\\alpha$** represents atmospheric absorption for sub-audible waves ($<20\\text{ Hz}$), which is nearly negligible ($\sim 0.001\\text{ dB/km}$). This allows heavy low-frequency producers to travel $40\\text{--}80+\\text{ miles}$ before dropping below the $0.1\\text{ Pa}$ ($\sim 74\\text{ dB SIL}$) threshold.")
             
-            # TRANS-BOUNDARY INFRASOUND DETECTION CARDS
             offscreen_sources = [a for a in audio_data if a.get("is_offscreen")]
             if offscreen_sources:
                 st.warning("### ⚠️ Active Trans-Boundary Infrasound Envelopes")
@@ -506,10 +519,10 @@ with tab_map:
         with panel_tab4:
             c_lore, c_media, c_season = st.columns(3)
             with c_lore:
-                st.markdown("#### 🪶 Isolated Tribal Lore")
+                st.markdown("#### 🪶 Isolated Indigenous Accounts")
                 if lore_data:
                     for item in lore_data:
-                        st.write(f"**{item.get('tribe_name')} — {item.get('entity_name')}:**")
+                        st.write(f"**{item.get('tribe_name')} — {item.get('entity_name')} (Weight: {item.get('evidence_weight', 1.5)}x):**")
                         st.caption(f"> {item.get('full_narrative')}")
                 else:
                     st.info("No recorded regional indigenous narratives within active target boundary.")
@@ -517,7 +530,7 @@ with tab_map:
                 st.markdown("#### 📰 Historical Press Archives")
                 if media_data:
                     for item in media_data:
-                        st.write(f"**{item.get('title')} ({item.get('pub_date')})**")
+                        st.write(f"**{item.get('title')} ({item.get('pub_date')}) [Weight: {item.get('evidence_weight', 1.2)}x]**")
                         if item.get("image_url"):
                             st.markdown(f"[📰 View Direct Library of Congress Scan]({item.get('image_url')})")
                         st.caption(f"{item.get('full_text_transcript')[:150]}...")
@@ -585,7 +598,7 @@ with tab_library:
 
     if "Sightings" in lib_choice:
         for item in sightings_data[:30]:
-            st.markdown(f"### {item.get('title')} ({item.get('event_date', 'N/A')})")
+            st.markdown(f"### {item.get('title')} ({item.get('event_date', 'N/A')}) [Weight: {item.get('evidence_weight', 1.0)}x]")
             c1, c2 = st.columns(2)
             with c1:
                 st.success("📊 **VERIFIED HARD PHYSICAL FACTS**")
@@ -607,14 +620,14 @@ with tab_library:
 
     elif "Press" in lib_choice:
         for item in media_data:
-            st.markdown(f"#### 📰 {item.get('title')} ({item.get('pub_date')})")
+            st.markdown(f"#### 📰 {item.get('title')} ({item.get('pub_date')}) [Evidence Weight: {item.get('evidence_weight', 1.2)}x]")
             if item.get("image_url"):
                 st.markdown(f"[📰 Direct Newspaper Scan Link]({item.get('image_url')})")
             st.write(f"> {item.get('full_text_transcript')}")
 
     elif "Lore" in lib_choice:
         for item in lore_data:
-            st.markdown(f"#### 🪶 {item.get('tribe_name')} — {item.get('entity_name')}")
+            st.markdown(f"#### 🪶 {item.get('tribe_name')} — {item.get('entity_name')} [Evidence Weight: {item.get('evidence_weight', 1.5)}x]")
             st.write(f"**Region Label:** {item.get('region_label')}")
             st.write(item.get("full_narrative"))
 
