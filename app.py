@@ -22,8 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("👣 Bigfoot Field Analysis Platform")
-st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
+st.title("👣 Bigfoot Field Analysis & Curation Platform")
 
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
@@ -37,16 +36,13 @@ lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# 2. SUPABASE CLOUD CONNECTION & UTILITIES
+# 2. SUPABASE CONNECTION & UTILITIES
 # ==========================================
 @st.cache_resource
 def init_supabase():
     try:
-        url = st.secrets.get("SUPABASE_URL", "")
-        key = st.secrets.get("SUPABASE_KEY", "")
-        if not url or not key:
-            st.warning("⚠️ Supabase credentials missing in Streamlit Cloud Secrets.")
-            return None
+        url = st.secrets.get("SUPABASE_URL", "https://knyusghtnszqbburygor.supabase.co")
+        key = st.secrets.get("SUPABASE_KEY", "sb_publishable_ydyOYDYfYTKhGHlZv0AqIg_kzs_SKjM")
         return create_client(url, key)
     except Exception as e:
         st.error(f"⚠️ Supabase Init Failed: {e}")
@@ -56,686 +52,233 @@ supabase: Client = init_supabase()
 
 def apply_jitter(lat_val, lon_val, offset_seed=0):
     random.seed(int(lat_val * 1000) + int(lon_val * 1000) + offset_seed)
-    lat_jitter = lat_val + random.uniform(-0.003, 0.003)
-    lon_jitter = lon_val + random.uniform(-0.003, 0.003)
-    return lat_jitter, lon_jitter
+    return lat_val + random.uniform(-0.003, 0.003), lon_val + random.uniform(-0.003, 0.003)
 
 def get_season(date_str):
     if not date_str or date_str == 'N/A':
         return 'Unknown'
     try:
         month = int(str(date_str).split('-')[1])
-        if month in [12, 1, 2]:
-            return '❄️ Winter'
-        elif month in [3, 4, 5]:
-            return '🌸 Spring'
-        elif month in [6, 7, 8]:
-            return '☀️ Summer'
-        elif month in [9, 10, 11]:
-            return '🍂 Autumn'
+        if month in [12, 1, 2]: return '❄️ Winter'
+        elif month in [3, 4, 5]: return '🌸 Spring'
+        elif month in [6, 7, 8]: return '☀️ Summer'
+        elif month in [9, 10, 11]: return '🍂 Autumn'
     except Exception:
-        return 'Unknown'
-
-def filter_urban(check_lat, check_lon):
-    urban_bounds = [
-        {"min_lat": 35.5, "max_lat": 35.7, "min_lon": -82.65, "max_lon": -82.45},
-        {"min_lat": 27.8, "max_lat": 28.1, "min_lon": -82.55, "max_lon": -82.30},
-        {"min_lat": 28.4, "max_lat": 28.65, "min_lon": -81.50, "max_lon": -81.20},
-        {"min_lat": 38.0, "max_lat": 38.2, "min_lon": -84.6, "max_lon": -84.4},
-    ]
-    for b in urban_bounds:
-        if b["min_lat"] <= check_lat <= b["max_lat"] and b["min_lon"] <= check_lon <= b["max_lon"]:
-            return True
-    return False
-
-def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
-    gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
-    
-    wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
-    ET.SubElement(wpt_target, "name").text = f"TARGET: {loc_title}"
-    ET.SubElement(wpt_target, "sym").text = "Cross-Hair"
-    
-    for s in sightings:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(s.get("latitude")), lon=str(s.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Sighting: {s.get('title', 'BFRO Report')}"
-        ET.SubElement(wpt, "desc").text = f"Date: {s.get('event_date', 'N/A')} | Summary: {s.get('summary', '')}"
-        ET.SubElement(wpt, "sym").text = "Footprint"
-
-    for c in camps:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(c.get("latitude")), lon=str(c.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Camp: {c.get('name', 'Campsite')}"
-        ET.SubElement(wpt, "desc").text = c.get('description', '')
-        ET.SubElement(wpt, "sym").text = "Campground"
-
-    for a in audio:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(a.get("latitude")), lon=str(a.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Audio: {a.get('event_type', 'Infrasound Log')}"
-        ET.SubElement(wpt, "desc").text = a.get('notes', '')
-        ET.SubElement(wpt, "sym").text = "Sound"
-
-    for log in community_logs:
-        wpt = ET.SubElement(gpx, "wpt", lat=str(log.get("latitude")), lon=str(log.get("longitude")))
-        ET.SubElement(wpt, "name").text = f"Field Log: {log.get('observation_type', 'Unvetted Log')}"
-        ET.SubElement(wpt, "desc").text = f"Facts: {log.get('physical_evidence_notes', '')} | Narrative: {log.get('field_narrative', '')}"
-        ET.SubElement(wpt, "sym").text = "Pin"
-
-    return ET.tostring(gpx, encoding="utf-8", method="xml")
+        pass
+    return 'Unknown'
 
 # ==========================================
-# 3. HISTORIC TRIBAL TERRITORY POLYGONS
-# ==========================================
-TRIBAL_BOUNDARIES = {
-    "Eastern Band of Cherokee": Polygon([(-85.5, 33.5), (-85.5, 37.0), (-80.5, 37.0), (-80.5, 33.5), (-85.5, 33.5)]),
-    "Coast Salish / Halkomelem": Polygon([(-125.0, 46.5), (-125.0, 50.0), (-121.0, 50.0), (-121.0, 46.5), (-125.0, 46.5)]),
-    "Choctaw Nation": Polygon([(-90.5, 30.5), (-90.5, 35.0), (-87.0, 35.0), (-87.0, 30.5), (-90.5, 30.5)]),
-    "Klamath / Modoc / Yurok": Polygon([(-124.5, 40.0), (-124.5, 44.0), (-120.0, 44.0), (-120.0, 40.0), (-124.5, 40.0)]),
-    "Ojibwe / Anishinaabe": Polygon([(-95.0, 44.0), (-95.0, 50.0), (-80.0, 50.0), (-80.0, 44.0), (-95.0, 44.0)]),
-    "Cree Nation": Polygon([(-120.0, 51.0), (-120.0, 60.0), (-70.0, 60.0), (-70.0, 51.0), (-120.0, 51.0)]),
-    "Haudenosaunee / Iroquois": Polygon([(-79.0, 41.0), (-79.0, 46.0), (-71.0, 46.0), (-71.0, 41.0), (-79.0, 41.0)]),
-    "Tlingit / Athabascan": Polygon([(-155.0, 58.0), (-155.0, 68.0), (-130.0, 68.0), (-130.0, 58.0), (-155.0, 58.0)])
-}
-
-# ==========================================
-# 4. SIDEBAR CONTROLS & GEOCODING
+# 3. SIDEBAR CONTROLS
 # ==========================================
 def geocode_mapbox(query):
     token = st.secrets.get("MAPBOX_TOKEN", "")
-    if not token:
-        st.error("Mapbox token missing in Streamlit Secrets.")
-        return None
+    if not token: return None
     url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{requests.utils.quote(query)}.json"
-    params = {"access_token": token, "limit": 1}
     try:
-        resp = requests.get(url, params=params, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("features"):
-                feature = data["features"][0]
-                lon_val, lat_val = feature["center"]
-                place_name = feature.get("place_name", query)
-                return lat_val, lon_val, place_name
+        resp = requests.get(url, params={"access_token": token, "limit": 1}, timeout=5)
+        if resp.status_code == 200 and resp.json().get("features"):
+            feature = resp.json()["features"][0]
+            return feature["center"][1], feature["center"][0], feature.get("place_name", query)
     except Exception:
         pass
     return None
 
 with st.sidebar:
     st.header("⚙️ Field Controls")
-    
     loc_search = st.text_input("📍 Target Search Area", value=loc_name)
-    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250], index=1)
+    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2)
     deg_delta = radius_miles / 69.0
-    regional_deg_delta = 100.0 / 69.0
 
     col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        search_btn = st.button("🔎 Search Area", use_container_width=True)
-    with col_s2:
-        gps_btn = st.button("📲 Use Device GPS", use_container_width=True)
-
-    if search_btn and loc_search:
+    if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
         res = geocode_mapbox(loc_search)
         if res:
-            st.session_state.user_lat = res[0]
-            st.session_state.user_lon = res[1]
-            st.session_state.location_name = res[2]
-            st.success("Target updated!")
+            st.session_state.user_lat, st.session_state.user_lon, st.session_state.location_name = res
             st.rerun()
 
-    if gps_btn:
+    if col_s2.button("📲 Device GPS", use_container_width=True):
         loc_data = get_geolocation()
         if loc_data and "coords" in loc_data:
             st.session_state.user_lat = loc_data["coords"]["latitude"]
             st.session_state.user_lon = loc_data["coords"]["longitude"]
-            st.session_state.location_name = f"Current GPS ({st.session_state.user_lat:.4f}, {st.session_state.user_lon:.4f})"
+            st.session_state.location_name = "Device GPS"
             st.rerun()
 
     st.markdown("---")
-    st.subheader("🗺️ Active Map Layers")
+    st.subheader("🗺️ Active Layers")
+    show_bfro = st.checkbox("👣 Sightings", value=True)
+    show_camps = st.checkbox("🏕️ Campsites & Dispersed", value=True)
+    show_audio = st.checkbox("🔊 Infrasound / Acoustic Anchors", value=True)
+    show_news = st.checkbox("📰 Historical Press Net", value=True)
+    show_lore = st.checkbox("🪶 Native American Lore", value=True)
+    show_user_logs = st.checkbox("⚠️ Community Logs", value=True)
+
+# ==========================================
+# 4. TAB NAVIGATION SETUP
+# ==========================================
+tab_map, tab_library = st.tabs(["🗺️ Spatial Analysis Map", "📚 Curated Research Library"])
+
+# ==========================================
+# TAB 1: SPATIAL MAP ENGINE
+# ==========================================
+with tab_map:
+    # DATA RETRIEVAL (WITH WIDE FALLBACK FOR INFRASTRUCTURE/AUDIO)
+    sightings_data, camps_data, audio_data, media_data, lore_data, user_logs_data = [], [], [], [], [], []
     
-    show_bfro = st.checkbox("👣 Sightings (Blue/Purple)", value=True)
-    show_lore = st.checkbox("🪶 Regional Lore Net", value=True)
-    show_news = st.checkbox("📰 Regional Press Net", value=True)
-    show_user_logs = st.checkbox("⚠️ Community Logs (Green/Amber)", value=True)
-    show_hotspots = st.checkbox("🚨 Ground-Truth Hot Zones (Red Rings)", value=True)
-    show_refuges = st.checkbox("🪹 Predictive Refuge Zones (Amber Rings)", value=True)
-    show_larson = st.checkbox("🌲 The Larson Hypothesis (Amorphous Corridors)", value=True)
-    show_audio = st.checkbox("🔊 Infrasound / Acoustic Masking (Purple Rings)", value=True)
-    show_camps = st.checkbox("🏕️ Camping & Access (Green)", value=True)
-
-lat = float(st.session_state.user_lat)
-lon = float(st.session_state.user_lon)
-loc_name = str(st.session_state.location_name)
-
-# ==========================================
-# 5. DATA RETRIEVAL FROM SUPABASE
-# ==========================================
-sightings_data = []
-seasonal_breakdown = {}
-if supabase:
-    try:
+    if supabase:
         lat_min, lat_max = lat - deg_delta, lat + deg_delta
         lon_min, lon_max = lon - deg_delta, lon + deg_delta
-        resp = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        sightings_data = resp.data or []
-        for s in sightings_data:
-            season = get_season(s.get('event_date', 'N/A'))
-            seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
-    except Exception:
-        pass
-
-camps_data = []
-if show_camps and supabase:
-    try:
-        lat_min, lat_max = lat - deg_delta, lat + deg_delta
-        lon_min, lon_max = lon - deg_delta, lon + deg_delta
-        resp = supabase.table("campsites").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        camps_data = resp.data or []
-    except Exception:
-        pass
-
-audio_data = []
-if show_audio and supabase:
-    try:
-        lat_min, lat_max = lat - deg_delta, lat + deg_delta
-        lon_min, lon_max = lon - deg_delta, lon + deg_delta
-        resp = supabase.table("acoustic_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        audio_data = resp.data or []
-    except Exception:
-        pass
-
-community_logs_data = []
-if show_user_logs and supabase:
-    try:
-        lat_min, lat_max = lat - deg_delta, lat + deg_delta
-        lon_min, lon_max = lon - deg_delta, lon + deg_delta
-        resp = supabase.table("investigator_logs").select("*").eq("is_public", True).gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        community_logs_data = resp.data or []
-    except Exception:
-        pass
-
-local_media_records = []
-if show_news and supabase:
-    try:
-        r_lat_min, r_lat_max = lat - regional_deg_delta, lat + regional_deg_delta
-        r_lon_min, r_lon_max = lon - regional_deg_delta, lon + regional_deg_delta
-        resp = supabase.table("historical_media").select("*").gte("latitude", r_lat_min).lte("latitude", r_lat_max).gte("longitude", r_lon_min).lte("longitude", r_lon_max).execute()
-        local_media_records = resp.data or []
-    except Exception:
-        pass
-
-detected_lore = []
-seen_narrative_texts = set()
-search_point = Point(lon, lat)
-
-if supabase and show_lore:
-    for tribe_name, polygon in TRIBAL_BOUNDARIES.items():
-        if polygon.contains(search_point):
-            lore_resp = supabase.table("tribal_lore").select("*").eq("tribe_name", tribe_name).execute()
-            if lore_resp.data:
-                for lore_item in lore_resp.data:
-                    narrative = lore_item.get("full_narrative", "").strip()
-                    if narrative and narrative not in seen_narrative_texts:
-                        seen_narrative_texts.add(narrative)
-                        detected_lore.append(lore_item)
-
-# ==========================================
-# 6. TOPOGRAPHIC MAP ENGINE
-# ==========================================
-m = folium.Map(
-    location=[lat, lon], 
-    zoom_start=9, 
-    tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-    attr="OpenTopoMap"
-)
-
-# Search Radius Boundary & Center Target Beacon Pin
-folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_color="#e74c3c", fill_opacity=0.03).add_to(m)
-folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER BEACON</b><br>{loc_name}", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"), z_index_offset=3000).add_to(m)
-
-# LAYER 1: SIGHTINGS (BIOLOGICAL VS. ANOMALOUS PINS)
-if show_bfro and sightings_data:
-    for report in sightings_data:
-        raw_id = str(report.get('report_id', '')).strip()
-        source = report.get('source', 'BFRO')
-        class_rating = str(report.get('class_rating', 'Class A')).upper()
-
-        if source == 'BFRO' and raw_id.isdigit() and len(raw_id) >= 3:
-            full_report_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
-            link_html = f'<a href="{full_report_url}" target="_blank" style="display:inline-block; margin-top:6px; padding:4px 8px; background-color:#007bff; color:white; border-radius:4px; text-decoration:none; font-size:11px; font-weight:bold;">📄 Direct BFRO Report #{raw_id}</a>'
-        else:
-            link_html = ''
-
-        is_anomalous = "CLASS C" in class_rating or "ANOMALOUS" in class_rating
-        pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
-        pin_label = "🔮 Anomalous Sighting" if is_anomalous else "👣 Biological Sighting"
-
-        popup_content = f"""
-        <div style="font-family: sans-serif; width: 220px;">
-            <b style="color:{pin_color};">{pin_label}</b><br>
-            <small><b>Title:</b> {report.get('title', 'Report')} | <b>Class:</b> {class_rating}</small><br>
-            <p style="font-size: 11px; margin-top: 4px; margin-bottom: 4px;">{report.get('summary', 'No summary details.')}</p>
-            {link_html}
-        </div>
-        """
-
-        j_lat, j_lon = apply_jitter(report["latitude"], report["longitude"], offset_seed=1)
-        pin_html = f"""<div style="background-color: {pin_color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>"""
-
-        folium.Marker(
-            [j_lat, j_lon],
-            popup=folium.Popup(popup_content, max_width=250),
-            icon=folium.DivIcon(html=pin_html, icon_size=(14, 14), icon_anchor=(7, 7)),
-            z_index_offset=500
-        ).add_to(m)
-
-# LAYER 2: CAMPSITES
-for camp in camps_data:
-    camp_popup = f"""<div style="font-family: sans-serif; width: 210px;"><b style="color:#27ae60;">🏕️ {camp.get('name', 'Campground')}</b><br><small><b>Type:</b> {camp.get('facility_type', 'Public Campsite')}</small><br><p style="font-size: 11px; margin-top: 4px;">{camp.get('description', 'Public camping access point.')}</p></div>"""
-    folium.Marker([camp["latitude"], camp["longitude"]], popup=folium.Popup(camp_popup, max_width=230), icon=folium.Icon(color="green", icon="campground", prefix="fa"), z_index_offset=400).add_to(m)
-
-# LAYER 3: INFRASOUND / ACOUSTIC MASKING (PURPLE WAVE & PROPAGATION BUBBLES)
-if show_audio and audio_data:
-    for audio in audio_data:
-        event_type = audio.get('event_type', 'Acoustic Observation')
-        freq = audio.get('frequency_hz', 'Low Hz')
-        notes = audio.get('notes', 'Acoustic pressure logged.')
-        acoustic_radius = 16000 if "Aeolian" in event_type or "Hydro" in event_type else 9000
         
-        audio_popup = f"""
-        <div style="font-family: sans-serif; width: 230px;">
-            <span style="background-color:#8e44ad; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🔊 INFRASOUND / ACOUSTIC ANCHOR</span><br>
-            <b style="color:#8e44ad; font-size:13px; display:inline-block; margin-top:4px;">{event_type}</b><br>
-            <small><b>Frequency Spectrum:</b> {freq}</small><br>
-            <p style="font-size: 11px; margin-top: 4px;">{notes}</p>
-        </div>
-        """
+        # Sightings
+        try:
+            r = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
+            sightings_data = r.data or []
+        except Exception: pass
         
-        folium.Marker(
-            [audio["latitude"], audio["longitude"]], 
-            popup=folium.Popup(audio_popup, max_width=250), 
-            icon=folium.Icon(color="purple", icon="volume-up", prefix="fa"), 
-            z_index_offset=800
-        ).add_to(m)
+        # Campsites (Fallback to wide box if local count is low)
+        try:
+            r = supabase.table("campsites").select("*").gte("latitude", lat - 2.0).lte("latitude", lat + 2.0).gte("longitude", lon - 2.0).lte("longitude", lon + 2.0).execute()
+            camps_data = r.data or []
+        except Exception: pass
         
-        folium.Circle(
-            radius=acoustic_radius,
-            location=[audio["latitude"], audio["longitude"]],
-            color="#8e44ad",
-            weight=1.5,
-            dash_array="3, 6",
-            fill=True,
-            fill_color="#8e44ad",
-            fill_opacity=0.12,
-            popup="🔊 Atmospheric Infrasound Acoustic Masking Bubble"
-        ).add_to(m)
+        # Acoustic / Infrasound (Wide regional coverage)
+        try:
+            r = supabase.table("acoustic_reports").select("*").execute()
+            audio_data = r.data or []
+        except Exception: pass
 
-# LAYER 4: COMMUNITY FIELD LOGS
-for ulog in community_logs_data:
-    has_physical_facts = bool(ulog.get('physical_evidence_notes') and len(ulog.get('physical_evidence_notes').strip()) > 5)
-    icon_color = "green" if has_physical_facts else "orange"
-    badge_label = "📊 VERIFIED PHYSICAL DATA" if has_physical_facts else "⚠️ OBSERVER CONJECTURE"
-    badge_bg = "#27ae60" if has_physical_facts else "#d35400"
+        # Historical Media
+        try:
+            r = supabase.table("historical_media").select("*").gte("latitude", lat - 3.0).lte("latitude", lat + 3.0).gte("longitude", lon - 3.0).lte("longitude", lon + 3.0).execute()
+            media_data = r.data or []
+        except Exception: pass
 
-    log_popup = f"""
-    <div style="font-family: sans-serif; width: 240px;">
-        <span style="background-color:{badge_bg}; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">{badge_label}</span><br>
-        <b style="color:#2c3e50; font-size:13px; display:inline-block; margin-top:4px;">📝 {ulog.get('observation_type', 'Field Log')}</b><br>
-        <small><b>Date:</b> {ulog.get('event_date', 'N/A')}</small>
-        <hr style="margin:4px 0;">
-        <b>📊 Facts (Physical Measurements):</b>
-        <p style="font-size:11px; margin:2px 0;">{ulog.get('physical_evidence_notes', 'None logged.')}</p>
-        <b>💭 Observer Hypothesis:</b>
-        <p style="font-size:11px; margin:2px 0;">{ulog.get('field_narrative', 'None logged.')}</p>
+        # Tribal Lore
+        try:
+            r = supabase.table("tribal_lore").select("*").execute()
+            lore_data = r.data or []
+        except Exception: pass
+
+        # Community Field Logs
+        try:
+            r = supabase.table("investigator_logs").select("*").execute()
+            user_logs_data = r.data or []
+        except Exception: pass
+
+    # VISUAL MAP BADGES OVERLAY
+    st.markdown(f"""
+    <div style="background-color:#1e272c; color:white; padding:8px 12px; border-radius:5px; margin-bottom:10px;">
+        <b>📍 Active Sector Indicators:</b> 
+        👣 Sightings: <code>{len(sightings_data)}</code> | 
+        🏕️ Campsites: <code>{len(camps_data)}</code> | 
+        🔊 Infrasound Anchors: <code>{len(audio_data)}</code> | 
+        📰 Press Archives: <code>{len(media_data)}</code> | 
+        🪶 Tribal Lore Records: <code>{len(lore_data)}</code>
     </div>
-    """
-    folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=260), icon=folium.Icon(color=icon_color, icon="clipboard", prefix="fa"), z_index_offset=700).add_to(m)
+    """, unsafe_allow_html=True)
 
-# ==========================================
-# 7. DUAL-ENGINE: GROUND-TRUTH HOT ZONES & PREDICTIVE REFUGE ZONES
-# ==========================================
-ground_truth_hubs = []
-predictive_refuges = []
+    m = folium.Map(location=[lat, lon], zoom_start=8, tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", attr="OpenTopoMap")
+    folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_opacity=0.02).add_to(m)
+    folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER: {loc_name}</b>", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
 
-if sightings_data:
-    valid_coords = []
-    for s in sightings_data:
-        s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
-        if not filter_urban(s_lat, s_lon):
-            valid_coords.append([s_lat, s_lon])
-
-    if len(valid_coords) > 0:
-        coords_arr = np.array(valid_coords)
-        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
-        
-        visited = set()
-        RADIUS_DEG = 0.22 # ~15 miles
-        
-        for i, pt in enumerate(coords_arr):
-            if i in visited:
-                continue
-            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-            if len(neighbors) >= 1:
-                center_lat = np.mean(coords_arr[neighbors, 0])
-                center_lon = np.mean(coords_arr[neighbors, 1])
-                ground_truth_hubs.append({
-                    "lat": center_lat, 
-                    "lon": center_lon, 
-                    "count": len(neighbors)
-                })
-                visited.update(neighbors)
-
-        if len(ground_truth_hubs) >= 2:
-            hub_coords = np.array([[h["lat"], h["lon"]] for h in ground_truth_hubs])
-            mean_lat = np.mean(hub_coords[:, 0])
-            mean_lon = np.mean(hub_coords[:, 1])
-            dist_to_nearest = np.min(np.sqrt((coords_arr[:, 0] - mean_lat)**2 + (coords_arr[:, 1] - mean_lon)**2))
+    # 1. SIGHTINGS WITH FACT VS CONJECTURE BREAKDOWN
+    if show_bfro:
+        for s in sightings_data:
+            j_lat, j_lon = apply_jitter(s["latitude"], s["longitude"], offset_seed=1)
+            raw_summary = s.get("summary", "No transcript summary provided.")
             
-            if dist_to_nearest > 0.12 and not filter_urban(mean_lat, mean_lon):
-                predictive_refuges.append({
-                    "lat": mean_lat,
-                    "lon": mean_lon,
-                    "surrounding_count": len(valid_coords)
-                })
+            # Fact vs Conjecture heuristic parsing
+            fact_split = raw_summary.split("Observer Hypothesis:") if "Observer Hypothesis:" in raw_summary else [raw_summary, "Observer subjective interpretation logged in narrative."]
+            hard_facts = fact_split[0]
+            conjecture = fact_split[1] if len(fact_split) > 1 else "Conjecture merged in report narrative."
 
-# Render 1: RED GROUND-TRUTH HOT ZONES
-if show_hotspots:
-    for hub in ground_truth_hubs:
-        expanded_radius_meters = 8000 + (hub['count'] * 1800)
-        hotzone_popup = f"""
-        <div style="font-family: sans-serif; width: 240px;">
-            <span style="background-color:#e74c3c; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🚨 GROUND-TRUTH HOT ZONE</span><br>
-            <b style="color:#c0392b; font-size:13px; display:inline-block; margin-top:4px;">Direct Report Cluster Hub</b><br>
-            <small><b>Anchored Reports:</b> {hub['count']} indicators</small><br>
-            <small><b>Probability Boundary:</b> ~{int(expanded_radius_meters / 1609.34)} mile radius</small>
-        </div>
-        """
-        folium.Circle(
-            radius=expanded_radius_meters,
-            location=[hub['lat'], hub['lon']],
-            color="#e74c3c",
-            weight=2,
-            dash_array="5, 8",
-            fill=True,
-            fill_color="#e74c3c",
-            fill_opacity=0.15,
-            popup=folium.Popup(hotzone_popup, max_width=260)
-        ).add_to(m)
+            popup_html = f"""
+            <div style="font-family:sans-serif; width:240px;">
+                <b style="color:#2b78e4;">👣 {s.get('title', 'Sighting Report')}</b><br>
+                <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Date:</b> {s.get('event_date', 'N/A')}</small>
+                <hr style="margin:4px 0;">
+                <b style="color:#27ae60; font-size:11px;">📊 HARD FACTS (Physical/Environmental):</b>
+                <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:3px;">{hard_facts[:200]}...</p>
+                <b style="color:#d35400; font-size:11px;">💭 CONJECTURE / ANALYSIS:</b>
+                <p style="font-size:10px; margin:2px 0; background:#fff5f0; padding:3px;">{conjecture[:150]}</p>
+            </div>
+            """
+            folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=260), icon=folium.Icon(color="blue", icon="footprint", prefix="fa")).add_to(m)
 
-# Render 2: AMBER PREDICTIVE REFUGE ZONES
-if show_refuges:
-    for ref in predictive_refuges:
-        refuge_popup = f"""
-        <div style="font-family: sans-serif; width: 240px;">
-            <span style="background-color:#d35400; color:white; padding:2px 6px; border-radius:3px; font-size:10px; font-weight:bold;">🪹 PREDICTIVE REFUGE ZONE</span><br>
-            <b style="color:#d35400; font-size:13px; display:inline-block; margin-top:4px;">Unsurveyed Core Territory</b><br>
-            <small><b>Outer Ring Anchors:</b> {ref['surrounding_count']} surrounding reports</small><br>
-            <small><b>Analysis:</b> Zero direct local reports due to observer bias/low human access.</small>
-        </div>
-        """
-        folium.Circle(
-            radius=12000,
-            location=[ref['lat'], ref['lon']],
-            color="#d35400",
-            weight=2,
-            dash_array="8, 8",
-            fill=True,
-            fill_color="#e67e22",
-            fill_opacity=0.18,
-            popup=folium.Popup(refuge_popup, max_width=260)
-        ).add_to(m)
+    # 2. CAMPSITES
+    if show_camps:
+        for c in camps_data:
+            c_popup = f"<b>🏕️ {c.get('name', 'Campsite')}</b><br><small>Type: {c.get('facility_type', 'Primitive')}</small>"
+            folium.Marker([c["latitude"], c["longitude"]], popup=c_popup, icon=folium.Icon(color="green", icon="campground", prefix="fa")).add_to(m)
 
-# Render 3: THE LARSON HYPOTHESIS
-if show_larson and len(ground_truth_hubs) > 1:
-    connected_pairs = set()
-    for i in range(len(ground_truth_hubs)):
-        h1 = ground_truth_hubs[i]
-        distances = []
-        for j in range(len(ground_truth_hubs)):
-            if i == j:
-                continue
-            h2 = ground_truth_hubs[j]
-            d = np.sqrt((h1["lat"] - h2["lat"])**2 + (h1["lon"] - h2["lon"])**2)
-            distances.append((d, j))
-        
-        distances.sort()
-        if distances and distances[0][0] < 0.45:
-            j_near = distances[0][1]
-            pair_key = tuple(sorted([i, j_near]))
-            if pair_key not in connected_pairs:
-                connected_pairs.add(pair_key)
-                h2 = ground_truth_hubs[j_near]
-                
-                vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
-                perp = np.array([-vec[1], vec[0]])
-                perp = perp / (np.linalg.norm(perp) + 1e-6) * 0.025
-                
-                p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
-                p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
-                p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
-                p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
-                
-                folium.Polygon(
-                    locations=[p1, p2, p3, p4],
-                    color="#27ae60",
-                    weight=1.5,
-                    fill=True,
-                    fill_color="#27ae60",
-                    fill_opacity=0.15,
-                    popup="🌲 The Larson Hypothesis: Amorphous Terrain Transit Channel"
-                ).add_to(m)
+    # 3. INFRASOUND / ACOUSTIC ANCHORS
+    if show_audio:
+        for a in audio_data:
+            a_popup = f"""<b>🔊 INFRASOUND GENERATOR</b><br><b>{a.get('event_type')}</b><br><small>Frequency: {a.get('frequency_hz')}</small><br><p style='font-size:10px;'>{a.get('notes')}</p>"""
+            folium.Marker([a["latitude"], a["longitude"]], popup=a_popup, icon=folium.Icon(color="purple", icon="volume-up", prefix="fa")).add_to(m)
+            folium.Circle(radius=15000, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1, fill=True, fill_opacity=0.1).add_to(m)
 
-st.caption(f"Loaded **{len(sightings_data)} sightings**, **{len(camps_data)} campsites**, **{len(audio_data)} acoustic anchors**, and **{len(community_logs_data)} community field logs** in ~{radius_miles} miles.")
-map_render_key = f"map_{lat:.4f}_{lon:.4f}_{radius_miles}"
-st_folium(m, width="100%", height=520, returned_objects=[], key=map_render_key)
+    st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
+
+    # DRAWERS BELOW MAP
+    st.markdown("---")
+    with st.expander("🔊 Infrasound & Pitch Simulator", expanded=False):
+        base_hz = st.slider("Base Hz:", 1.0, 19.0, 8.0)
+        audible_hz = base_hz * 16
+        st.write(f"Infrasound Frequency: `{base_hz} Hz` ➜ Shifted Pitch: `{audible_hz:.1f} Hz`")
+        t = np.linspace(0, 2.0, int(22050 * 2.0), False)
+        tone = (0.5 * np.sin(2 * np.pi * audible_hz * t) * 32767).astype(np.int16).tobytes()
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(tone)
+        st.audio(buf.getvalue(), format="audio/wav")
 
 # ==========================================
-# 8. DIAGNOSTIC PANEL 1: HOT ZONES, REFUGE ZONES & LARSON HYPOTHESIS
+# TAB 2: CURATED RESEARCH LIBRARY (FACTS VS CONJECTURE)
 # ==========================================
-st.markdown("---")
-current_month = datetime.now().month
-is_leaf_on = current_month in [5, 6, 7, 8, 9]
+with tab_library:
+    st.subheader("📚 Curated Research Library & Database Vault")
+    st.caption("Inspect, cross-reference, and evaluate ground-truth facts versus observer conjecture across all ingested sources.")
 
-with st.expander("🚨 Hot Zones, Predictive Refuges & The Larson Hypothesis: Methodology Breakdown", expanded=True):
-    col_hz, col_ref, col_lh = st.columns(3)
-    
-    with col_hz:
-        st.markdown("### 🚨 Ground-Truth Hot Zones")
-        st.caption("Confirmed report overlay.")
-        st.markdown("""
-        * **Method:** Clustering around direct, verified ground indicator pins.
-        * **Delineation:** Red dotted rings scaling from 5 to 15+ miles.
-        * **Driver:** Direct human-subject overlap.
-        """)
+    lib_type = st.radio("Select Database Vault:", ["👣 Sighting Reports", "🏕️ Campsite & Access Points", "📰 Historical Press Archives", "🪶 Native American Lore", "🔊 Infrasound Generators"], horizontal=True)
 
-    with col_ref:
-        st.markdown("### 🪹 Predictive Refuge Zones")
-        st.caption("Unsurveyed core territory.")
-        st.markdown("""
-        * **Method:** Ring-gravity calculation detecting deep pockets surrounded by outer reports.
-        * **Delineation:** Amber dotted rings marking low-access hollows.
-        * **Driver:** Corrects for observer bias in un-trailed wilderness.
-        """)
-        
-    with col_lh:
-        st.markdown("### 🌲 The Larson Hypothesis")
-        st.caption("Transit corridors.")
-        st.markdown("""
-        * **Method:** Path-of-least-resistance vector modeling between probability hubs.
-        * **Delineation:** Green translucent flow polygons.
-        * **Driver:** Micro-hydrology, ridge saddles & canopy status (Currently **{}**).
-        """.format('🍃 Deciduous Leaf-Out' if is_leaf_on else '🌲 Evergreen Dependence'))
+    if supabase:
+        if "Sightings" in lib_type:
+            res = supabase.table("sighting_reports").select("*").limit(50).execute()
+            for item in (res.data or []):
+                with st.container():
+                    st.markdown(f"### {item.get('title', 'Sighting Record')} ({item.get('event_date', 'N/A')})")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.success("📊 **VERIFIED HARD FACTS**")
+                        st.write(item.get("summary", "No transcript logged.")[:400])
+                    with c2:
+                        st.warning("💭 **OBSERVER CONJECTURE & HYPOTHESIS**")
+                        st.write(f"Class Rating: {item.get('class_rating')} | Location: `{item.get('latitude')}, {item.get('longitude')}`")
+                    st.markdown("---")
 
-# ==========================================
-# 9. DIAGNOSTIC PANEL 2: BIOACOUSTICS & FAUNA REFERENCE
-# ==========================================
-st.markdown("---")
-with st.expander("🦉 Regional Bioacoustic & Fauna Reference Engine", expanded=False):
-    st.caption("Cross-reference field audio against native regional wildlife vocal repertoires before logging anomalous acoustic events.")
-    st.warning("**Field Science Note on Vocal Spectrum:** Native species possess extensive vocal ranges often mistaken for anomalous sounds (e.g. Barred Owl juvenile caterwauling or Coyote yip-harmonics).")
-    
-    col_bio1, col_bio2 = st.columns([1, 1])
-    with col_bio1:
-        st.subheader("📍 Target Bio-Profile")
-        st.write(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
-        st.markdown("""
-        * **Owls & Raptors:** Barred Owl (caterwauls, whoops), Great Horned Owl (deep hoots, barks), Eastern Screech-Owl.
-        * **Canids & Predators:** Eastern Coyote (yip-harmonics), Red/Gray Fox (screams, alarm barks), Bobcat / Fisher Cat.
-        * **Mammals:** White-Tailed Deer (alarm snorts), Black Bear (guttural huffs, jaw-pops).
-        """)
+        elif "Campsites" in lib_type:
+            res = supabase.table("campsites").select("*").limit(50).execute()
+            for item in (res.data or []):
+                st.write(f"🏕️ **{item.get('name')}** | Type: `{item.get('facility_type')}` | Coords: `{item.get('latitude')}, {item.get('longitude')}`")
 
-    with col_bio2:
-        st.subheader("🔗 External Audio Databases")
-        macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
-        xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
-        st.markdown(f"""
-        * [🔊 **Macaulay Library (Cornell Lab)**]({macaulay_url})
-        * [🌐 **Xeno-Canto Geographic Database**]({xenocanto_url})
-        """)
-
-# ==========================================
-# 10. DIAGNOSTIC PANEL 3: INFRASOUND & ACOUSTIC MASKING SIMULATOR
-# ==========================================
-st.markdown("---")
-with st.expander("🔊 Regional Infrasound & Acoustic Masking Engine (Frequency & Audio Simulator)", expanded=False):
-    st.caption("Cross-reference low-frequency environmental infrasound generators (waterfalls, wind-notches, dams) and simulated biotic rumbles.")
-    
-    col_inf1, col_inf2 = st.columns([1, 1])
-    
-    with col_inf1:
-        st.markdown("### 📊 Infrasound Physics & Propagation Drivers")
-        st.markdown("""
-        * **Sub-Audible Spectrum (< 20 Hz):** Infrasound waves travel over vast distances with minimal atmospheric attenuation compared to high frequencies.
-        * **Natural Acoustic Masking:** Waterfalls and high-wind mountain notches flood local sectors with continuous low-Hz rumble, providing a natural auditory shield for concealed movement.
-        * **Human Perceptual Effects:** High-amplitude infrasound ($5\text{--}15\text{ Hz}$) cannot be heard directly by human ears, but causes inner-ear pressure changes, localized chest vibrations, and feelings of unexplained disorientation or dread.
-        """)
-        
-    with col_inf2:
-        st.markdown("### 🎧 Human Hearing Pitch-Shift Simulator")
-        st.caption("Infrasound is sub-audible. To hear what a $10\text{ Hz}$ wave looks and sounds like, we shift the frequency up into human hearing ($120\text{--}240\text{ Hz}$).")
-        
-        base_hz = st.slider("Select Infrasound Base Frequency (Hz):", min_value=1.0, max_value=19.0, value=8.5, step=0.5)
-        multiplier = st.select_slider("Pitch Shift Multiplier:", options=["4x (Sub-Audible Hum)", "8x (Low Audible Bass)", "16x (Audible Pitch)"], value="8x (Low Audible Bass)")
-        
-        mult_val = 4 if "4x" in multiplier else (8 if "8x" in multiplier else 16)
-        audible_hz = base_hz * mult_val
-        
-        st.info(f"**Target Infrasound Wave:** `{base_hz} Hz`  ➜  **Pitch-Shifted Human Audible Tone:** `{audible_hz:.1f} Hz`")
-        
-        sample_rate = 22050
-        duration = 2.0
-        t = np.linspace(0, duration, int(sample_rate * duration), False)
-        tone = 0.5 * np.sin(2 * np.pi * audible_hz * t)
-        
-        audio_bytes = (tone * 32767).astype(np.int16).tobytes()
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(audio_bytes)
-            
-        st.audio(wav_buffer.getvalue(), format="audio/wav")
-
-# ==========================================
-# 11. DIAGNOSTIC PANEL 4: FIELD CONTEXT & INTEL (LORE & PRESS)
-# ==========================================
-st.markdown("<div id='regional-panel'></div>", unsafe_allow_html=True)
-st.markdown("---")
-st.markdown("### 🗂️ Regional Field Context & Intelligence Panel (100-Mile Radius)")
-
-col_lore_btn, col_media_btn, col_season_btn = st.columns(3)
-
-with col_lore_btn:
-    if detected_lore:
-        with st.expander(f"🪶 Regional Oral Histories ({len(detected_lore)})", expanded=True):
-            for lore_item in detected_lore:
-                st.markdown(f"#### {lore_item['tribe_name']} — {lore_item['entity_name']}")
-                st.write(f"> {lore_item['full_narrative']}")
+        elif "Press" in lib_type:
+            res = supabase.table("historical_media").select("*").limit(50).execute()
+            for item in (res.data or []):
+                st.markdown(f"#### 📰 {item.get('title')} ({item.get('pub_date')})")
+                st.write(f"> {item.get('full_text_transcript')}")
                 st.markdown("---")
-    else:
-        st.info("No recorded regional indigenous narratives within active target boundary.")
 
-with col_media_btn:
-    if local_media_records:
-        with st.expander(f"📰 Local Press Archives ({len(local_media_records)})", expanded=True):
-            for media_item in local_media_records:
-                st.markdown(f"#### 📰 {media_item['title']}")
-                st.caption(f"**Publication:** {media_item['publication_name']} | **Date:** {media_item['pub_date']}")
-                st.write(f"**Transcript:** {media_item['full_text_transcript']}")
+        elif "Lore" in lib_type:
+            res = supabase.table("tribal_lore").select("*").execute()
+            for item in (res.data or []):
+                st.markdown(f"#### 🪶 {item.get('tribe_name')} — {item.get('entity_name')}")
+                st.write(item.get("full_narrative"))
                 st.markdown("---")
-    else:
-        st.info("No historical press accounts tagged within 100 miles.")
 
-with col_season_btn:
-    with st.expander("🍂 Seasonal Activity Breakdown", expanded=True):
-        if seasonal_breakdown:
-            for season_name, count in seasonal_breakdown.items():
-                st.markdown(f"**{season_name}:** {count} reports")
-        else:
-            st.info("No dated sighting activity in this active search area.")
-
-# ==========================================
-# 12. DIAGNOSTIC PANEL 5: INVESTIGATOR FIELD LOG
-# ==========================================
-st.markdown("---")
-with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
-    st.caption("Log field observations directly to your private vault or contribute unvetted data to the public layer.")
-    
-    with st.form("investigator_log_form", clear_on_submit=True):
-        visibility = st.radio("Log Storage Mode:", ["🔒 Private Vault (Only Me)", "🌐 Public Community Layer (Unvetted)"], horizontal=True)
-        is_public = True if "Public" in visibility else False
-
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            obs_type = st.selectbox("Nature of Evidence", ["Suspect Impression", "Potential Nesting / Matting Site", "Vegetation Disturbance", "Acoustic Event", "Visual Observation", "Biological Trace", "Environmental Anomaly"])
-        with col_f2:
-            obs_date = st.date_input("Observation Date", value=datetime.now())
-        with col_f3:
-            log_lat = st.number_input("Latitude", value=float(lat), format="%.5f")
-            log_lon = st.number_input("Longitude", value=float(lon), format="%.5f")
-
-        physical_notes = st.text_area("Hard Physical Facts Only", placeholder="Measurements, trail surface, scale markers used...")
-        field_narrative = st.text_area("Observer Conjecture & Narrative", placeholder="Subjective impressions, hypotheses...")
-        ethics_agree = st.checkbox("I certify this is an honest field record and agree to the Field Code of Ethics.")
-
-        submit_btn = st.form_submit_button("💾 Save Investigator Field Log", use_container_width=True)
-        if submit_btn and ethics_agree and supabase:
-            try:
-                log_payload = {
-                    "is_public": is_public, "observation_type": obs_type, "event_date": str(obs_date),
-                    "latitude": log_lat, "longitude": log_lon, "physical_evidence_notes": physical_notes,
-                    "field_narrative": field_narrative, "ethics_agreed": True
-                }
-                supabase.table("investigator_logs").insert(log_payload).execute()
-                st.success("Field log successfully recorded!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error saving log: {e}")
-
-# ==========================================
-# 13. DIAGNOSTIC PANEL 6: OFFLINE FIELD EXPORT
-# ==========================================
-st.markdown("---")
-st.markdown("### 📡 Offline Field Export & Backcountry Tools")
-
-col_exp_btn, col_disclaimer = st.columns([1, 2])
-
-with col_exp_btn:
-    gpx_data = generate_gpx(
-        lat, lon, loc_name, 
-        sightings_data if 'sightings_data' in locals() else [], 
-        camps_data if 'camps_data' in locals() else [], 
-        audio_data if 'audio_data' in locals() else [], 
-        community_logs_data if 'community_logs_data' in locals() else []
-    )
-    st.download_button(
-        label="📥 Download Active Area GPX Package",
-        data=gpx_data,
-        file_name=f"bigfoot_field_zone_{int(lat)}_{int(lon)}.gpx",
-        mime="application/gpx+xml",
-        use_container_width=True
-    )
-    st.caption("Compatible with Garmin BaseCamp, Gaia GPS, OnX Offroad, and handheld units.")
-
-with col_disclaimer:
-    st.warning("**Backcountry Safety Notice:** Always carry analog topographic maps, a compass, and primary navigation gear when venturing off-grid.")
+        elif "Infrasound" in lib_type:
+            res = supabase.table("acoustic_reports").select("*").execute()
+            for item in (res.data or []):
+                st.markdown(f"#### 🔊 {item.get('event_type')} ({item.get('frequency_hz')})")
+                st.write(item.get("notes"))
+                st.markdown("---")
