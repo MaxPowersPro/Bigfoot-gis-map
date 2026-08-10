@@ -596,48 +596,144 @@ with tab_map:
         )
 
 # ==========================================
-# TAB 2: RESEARCH LIBRARY
+# TAB 2: RESEARCH LIBRARY & SOURCE VAULT
 # ==========================================
 with tab_library:
-    st.subheader("📚 Curated Research Library & Source Vault")
-    lib_choice = st.radio("Select Vault:", ["👣 Sightings (3,818)", "🦉 Bioacoustics & Fauna Repertoires", "📰 Press Archives", "🪶 Native American Lore", "🔊 Infrasound Generators"], horizontal=True)
+    st.header("📚 Curated Research Library & Deep Science Vault")
+    st.caption("Comprehensive academic reference, archival scans, and acoustic physics field guides.")
 
-    if "Sightings" in lib_choice:
+    lib_choice = st.radio(
+        "Select Vault Section:", 
+        ["👣 BFRO Sightings Database", "🔊 Crash Course: Infrasound Physics & Biology", "📰 Historical Press Archives", "🪶 Indigenous Ethnographic Lore", "🦉 Bioacoustics & Fauna Repertoires"], 
+        horizontal=True
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------
+    # 1. BFRO SIGHTINGS WITH DIRECT LINKS
+    # --------------------------------------------------
+    if "BFRO Sightings" in lib_choice:
+        st.subheader("👣 BFRO Field Report Archives")
+        st.write(f"Displaying curated reports active in regional cache ({len(sightings_data)} total loaded):")
+        
         for item in sightings_data[:30]:
-            st.markdown(f"### {item.get('title')} ({item.get('event_date', 'N/A')}) [Weight: {item.get('evidence_weight', 1.0)}x]")
-            c1, c2 = st.columns(2)
+            raw_id = str(item.get('report_id', '')).strip()
+            title = item.get('title', 'Sighting Report')
+            event_date = item.get('event_date', 'N/A')
+            class_rating = item.get('class_rating', 'Class A')
+            weight = item.get('evidence_weight', 1.0)
+            county = item.get('county', 'Unknown')
+            state = item.get('state', 'Sector Zone')
+            summary = item.get('summary', 'No summary transcript recorded.')
+
+            st.markdown(f"### {title} ({event_date})")
+            
+            c1, c2 = st.columns([3, 1])
             with c1:
-                st.success("📊 **VERIFIED HARD PHYSICAL FACTS**")
-                st.write(f"**Location:** {item.get('county')}, {item.get('state')} (`{item.get('latitude')}, {item.get('longitude')}`)")
-                st.write(item.get("summary"))
+                st.markdown(f"**Location:** {county}, {state} (`{item.get('latitude')}, {item.get('longitude')}`)")
+                st.markdown(f"**Classification:** `{class_rating}` | **Evidence Weight:** `{weight}x`")
+                st.info(f"**Observed Physical Facts:**\n\n{summary}")
+            
             with c2:
-                st.warning("💭 **OBSERVER CONJECTURE & EVALUATION**")
-                st.write(f"**Class Rating:** {item.get('class_rating')} | **Source:** {item.get('source')}")
+                if raw_id.isdigit():
+                    bfro_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
+                    st.markdown(f"[📄 **View Full Official BFRO Report #{raw_id}**]({bfro_url})")
+                else:
+                    st.caption("No direct online report ID associated.")
+            
             st.markdown("---")
 
-    elif "Bioacoustics" in lib_choice:
-        st.markdown("### 🦉 Regional Wildlife Vocal Repertoires")
+    # --------------------------------------------------
+    # 2. INFRASOUND CRASH COURSE (DEEP PARAGRAPHS)
+    # --------------------------------------------------
+    elif "Infrasound" in lib_choice:
+        st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
+        
         st.markdown("""
-        * **Barred Owl (*Strix varia*):** Expresses up to 13 distinct vocalizations including rhythmic 'cook-whoo' calls, high-pitched caters, and juvenile squawking.
-        * **Eastern Coyote (*Canis latrans*):** Group howl-yips featuring fundamental frequencies from 400 Hz to 1.2 kHz, often creating phantom acoustic harmonics.
-        * **Red Fox (*Vulpes vulpes*):** High-pitched alarm screams and raspy rasp-barks in the 1.5 kHz to 3.5 kHz spectrum often misidentified as hominid vocalizations.
-        * **White-Tailed Deer (*Odocoileus virginianus*):** Explosive high-velocity nasal snorts used for perimeter danger warnings.
+        ### What is Infrasound?
+        Infrasound refers to acoustic sound waves that oscillate at frequencies below the human lower limit of audibility—typically defined as **0.1 Hz to 20 Hz**. Because these waves possess extremely long wavelengths (ranging from 17 meters up to several kilometers), they interact with the environment in ways vastly different from audible sound. High-frequency sound waves are easily absorbed by foliage, terrain, and air moisture, whereas infrasonic waves pass through dense forest canopy, timber walls, and solid granite with almost zero atmospheric attenuation.
+
+        ---
+
+        ### Atmospheric Propagation & Wave Ducting
+        The primary reason infrasound is critical to field analytics is its ability to travel vast distances ($40\text{--}100+\text{ miles}$) without losing significant energy. The attenuation of acoustic waves in air is governed by spherical spreading and atmospheric absorption ($\alpha$):
+
+        $$\Delta L = 20 \log_{10}\left(\frac{R}{R_0}\right) + \alpha R$$
+
+        At standard audible frequencies ($1,000\text{ Hz}$), atmospheric absorption ($\alpha$) rapidly dampens sound over a few hundred yards. However, at sub-audible frequencies ($1\text{--}10\text{ Hz}$), $\alpha \approx 0.001\text{ dB/km}$. Under specific atmospheric conditions—such as thermal inversions or low-altitude pressure boundaries—infrasonic waves bounce between the ground and the troposphere in a phenomenon called **acoustic ducting**. This enables natural and artificial infrasound generators to saturate entire mountain valleys and wilderness corridors.
+
+        ---
+
+        ### Abiotic vs. Biotic Infrasound Sources
+        Infrasound generators in wilderness research fall into two distinct categories:
+
+        1. **Abiotic (Environmental Masking Generators):**
+           * **Aeolian Wind-Notch Effect:** High-velocity wind pressing through narrow mountain passes and granite gorges acts as a giant Helmholtz resonator, generating continuous low-frequency standing waves ($0.5\text{--}5.0\text{ Hz}$).
+           * **Hydrological Hydraulics:** Waterfalls, high-volume river rapids, and hydro-electric dams produce deep hydraulic impact waves ($3\text{--}15\text{ Hz}$). These high-energy zones create localized "acoustic masking envelopes" where animals can vocalize or move without high-frequency sounds carrying to human ears.
+
+        2. **Biotic (Biological Infrasound Production):**
+           * Large terrestrial mammals—most notably African Elephants (*Loxodonta africana*), Tigers (*Panthera tigris*), and Cassowaries—utilize deep laryngeal structures or vocal folds to produce high-amplitude sub-audible vocalizations. 
+           * Hypothesized relict hominids or unclassified primates possess estimated thoracic volumes capable of emitting $8\text{--}18\text{ Hz}$ acoustic pulses. These low-frequency emissions serve a dual biological purpose: long-range territorial signaling across vast forest tracts and potential defensive incapacitation of intruding competitors.
+
+        ---
+
+        ### Physiological & Neurological Effects on Humans
+        When humans enter an active infrasound field without knowing it, the body responds physically even if the ears register no sound. This phenomenon—often termed the "Vicinity Effect" or "Awe/Dread State"—occurs because sub-audible sound waves vibrate human internal organs and fluid cavities:
+
+        * **$1.0\text{ Hz} - 7.0\text{ Hz}$ (Inner Ear & Balance):** Matches the resonant frequency of inner ear fluid and vestibular systems, producing sudden dizziness, micro-barometric headaches, unexplainable fatigue, and loss of equilibrium.
+        * **$7.0\text{ Hz} - 12.0\text{ Hz}$ (Central Nervous System Resonance):** Overlaps with human brain alpha wave frequencies ($8\text{--}12\text{ Hz}$). Prolonged exposure induces acute hyper-vigilance, an unexplainable sensation of being watched, and extreme irrational dread.
+        * **$18.0\text{ Hz} - 19.0\text{ Hz}$ (Ocular Resonance):** Exactly matches the resonant frequency of the human eyeball ($18.9\text{ Hz}$). Exposure at this specific pitch causes the eyeball to vibrate subtly, creating visual smear artifacts, peripheral optical illusions (often reported as "shadow figures"), and blurred spatial perception.
+        * **$50\text{ Hz} - 100\text{ Hz}$ Harmonics (Chest Cavity Vibration):** Higher-order audible harmonics accompanying infrasound bursts physically vibrate human chest wall tissue, creating a sensation of intense pressure or breathlessness.
+
+        ---
+
+        ### Field Identification & Signal Processing Guidelines
+        When deploying acoustic hardware (such as specialized infrasound micro-barometers or low-frequency hydrophones) in target sectors:
+        * **Filter High-Frequency Wind Noise:** Always fit recording diaphragms with porous foam or wind-damping tubes to eliminate local surface gusts ($>20\text{ Hz}$) from corrupting low-frequency baseline readings.
+        * **Cross-Reference Geomorphic Features:** If an infrasound spike is detected at $5\text{ Hz}$, check the map layers for wind-notch mountain passes or hydroelectric spillways within a 60-mile radius before classifying the signal as biological.
         """)
 
-    elif "Press" in lib_choice:
+    # --------------------------------------------------
+    # 3. HISTORICAL PRESS ARCHIVES
+    # --------------------------------------------------
+    elif "Press Archives" in lib_choice:
+        st.subheader("📰 Historical Press Archives & Pre-Internet Media Scan Vault")
+        
         for item in media_data:
-            st.markdown(f"#### 📰 {item.get('title')} ({item.get('pub_date')}) [Evidence Weight: {item.get('evidence_weight', 1.2)}x]")
+            pub_name = item.get('publication_name', item.get('source', 'Historical Gazette'))
+            st.markdown(f"#### 📰 {item.get('title')} ({item.get('pub_date')})")
+            st.markdown(f"**Publication:** `{pub_name}` | **Location:** {item.get('county', 'N/A')}, {item.get('state', 'N/A')} | **Weight:** `{item.get('evidence_weight', 1.2)}x`")
+            
             if item.get("image_url"):
-                st.markdown(f"[📰 Direct Newspaper Scan Link]({item.get('image_url')})")
+                st.markdown(f"[📰 **View Direct Newspaper Scan Link**]({item.get('image_url')})")
+            
             st.write(f"> {item.get('full_text_transcript')}")
+            st.markdown("---")
 
+    # --------------------------------------------------
+    # 4. INDIGENOUS ETHNOGRAPHIC LORE
+    # --------------------------------------------------
     elif "Lore" in lib_choice:
+        st.subheader("🪶 Indigenous Ethnographic Lore & Regional Land Anchors")
+        
         for item in lore_data:
-            st.markdown(f"#### 🪶 {item.get('tribe_name')} — {item.get('entity_name')} [Evidence Weight: {item.get('evidence_weight', 1.5)}x]")
-            st.write(f"**Region Label:** {item.get('region_label')}")
+            st.markdown(f"#### 🪶 {item.get('tribe_name')} — *{item.get('entity_name')}*")
+            st.markdown(f"**Region:** `{item.get('region_label')}` | **Evidence Weight:** `{item.get('evidence_weight', 1.5)}x`")
             st.write(item.get("full_narrative"))
+            st.markdown("---")
 
-    elif "Infrasound" in lib_choice:
-        for item in audio_data:
-            st.markdown(f"#### 🔊 {item.get('event_type')} ({item.get('frequency_hz')})")
-            st.write(item.get("notes"))
+    # --------------------------------------------------
+    # 5. BIOACOUSTICS & FAUNA REPERTOIRES
+    # --------------------------------------------------
+    elif "Bioacoustics" in lib_choice:
+        st.subheader("🦉 Bioacoustics & Wildlife Vocal Repertoire Guide")
+        st.markdown("""
+        When conducting field research, over 90% of suspected vocalizations belong to known regional fauna. Understanding these repertoires prevents false positives:
+
+        * **Barred Owl (*Strix varia*):** Produces up to 13 distinct vocalizations including rhythmic 'cook-whoo-whoo-cook-whoo-all', high-pitched caterwauling, and juvenile squawking that sounds eerily hominid.
+        * **Eastern Coyote (*Canis latrans*):** Group howl-yips featuring fundamental frequencies from 400 Hz to 1.2 kHz, creating phantom acoustic harmonics that sound like multiple vocalizers across a valley.
+        * **Red Fox (*Vulpes vulpes*):** High-pitched alarm screams and raspy rasp-barks in the 1.5 kHz to 3.5 kHz spectrum often misidentified as primate shrieks.
+        * **White-Tailed Deer (*Odocoileus virginianus*):** Explosive high-velocity nasal snorts used for perimeter danger warnings, often mistaken for vocal huffs or blowing sounds.
+        * **Fisher Cat (*Pekania pennanti*):** High-pitched night shrieks and guttural distress calls that mimic human distress.
+        """)
