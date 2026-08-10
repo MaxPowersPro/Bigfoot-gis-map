@@ -602,7 +602,7 @@ with tab_library:
     # --------------------------------------------------
     # INFRASOUND CRASH COURSE (PARAGRAPH-DRIVEN EDUCATIONAL VAULT)
     # --------------------------------------------------
-    elif "Infrasound" in lib_choice:
+    if "Infrasound" in lib_choice:
         st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
         st.caption("A field reference manual on sub-audible acoustic mechanics and human neurological resonance.")
         
