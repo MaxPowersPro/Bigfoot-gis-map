@@ -13,7 +13,7 @@ import io
 import wave
 
 # ==========================================
-# 1. PAGE SETUP & SESSION STATE INIT
+# 1. PAGE SETUP & AUTO-LOCATION INIT
 # ==========================================
 st.set_page_config(
     page_title="Bigfoot Field Analysis Platform",
@@ -22,7 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Check for visitor's browser location on first load
+# Auto-detect visitor's location on startup
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
     device_loc = get_geolocation()
     if device_loc and "coords" in device_loc:
@@ -40,7 +40,7 @@ lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# CUSTOM BRANDING HEADER (SINGLE BANNER)
+# CUSTOM BRANDING HEADER BANNER
 # ==========================================
 try:
     st.image("image.png", use_container_width=True)
@@ -219,7 +219,10 @@ if supabase:
 
     try:
         r = supabase.table("campsites").select("*").execute()
-        camps_data = r.data or []
+        raw_camps = r.data or []
+        for c in raw_camps:
+            if haversine_miles(lat, lon, float(c["latitude"]), float(c["longitude"])) <= radius_miles:
+                camps_data.append(c)
     except Exception: pass
 
     try:
@@ -247,13 +250,17 @@ if supabase:
         r = supabase.table("historical_media").select("*").execute()
         raw_media = r.data or []
         for m_item in raw_media:
-            m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
-            media_data.append(m_item)
+            if haversine_miles(lat, lon, float(m_item["latitude"]), float(m_item["longitude"])) <= radius_miles:
+                m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
+                media_data.append(m_item)
     except Exception: pass
 
     try:
         r = supabase.table("investigator_logs").select("*").execute()
-        user_logs_data = r.data or []
+        raw_logs = r.data or []
+        for log in raw_logs:
+            if haversine_miles(lat, lon, float(log["latitude"]), float(log["longitude"])) <= radius_miles:
+                user_logs_data.append(log)
     except Exception: pass
 
     search_pt = Point(lon, lat)
@@ -280,7 +287,7 @@ if supabase:
 with tab_map:
     st.markdown(f"""
     <div style="background-color:#1e272c; color:white; padding:8px 12px; border-radius:5px; margin-bottom:10px;">
-        <b>📍 Active Sector Records:</b> 
+        <b>📍 Active Sector Records (Within {radius_miles} miles):</b> 
         👣 Sightings: <code>{len(sightings_data)}</code> | 
         🪶 Filtered Lore: <code>{len(lore_data)}</code> | 
         📰 Press Archives: <code>{len(media_data)}</code> | 
@@ -555,7 +562,7 @@ with tab_map:
                     st.write(f"**{season_name}:** {count} reports")
 
     # ==========================================
-    # THREE SEPARATE EXPANDABLE DRAWERS (IN ORDER)
+    # THREE SEPARATE EXPANDABLE DRAWERS (SITE SPECIFIC)
     # ==========================================
     st.markdown("---")
 
@@ -584,8 +591,8 @@ with tab_map:
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-    # DRAWER 2: REGIONAL CAMPSITES & BACKCOUNTRY ACCESS
-    with st.expander("🏕️ Regional Campsites & Backcountry Access", expanded=False):
+    # DRAWER 2: REGIONAL CAMPSITES & BACKCOUNTRY ACCESS (SITE SPECIFIC)
+    with st.expander(f"🏕️ Regional Campsites & Backcountry Access (Within {radius_miles} miles)", expanded=False):
         if camps_data:
             for c in camps_data[:20]:
                 st.write(f"🏕️ **{c.get('name')}** | Type: `{c.get('type')}` | Coords: `{c.get('latitude')}, {c.get('longitude')}`")
@@ -603,58 +610,115 @@ with tab_map:
         )
 
 # ==========================================
-# TAB 2: RESEARCH LIBRARY
+# TAB 2: RESEARCH LIBRARY & SOURCE VAULT
 # ==========================================
 with tab_library:
-    st.subheader("📚 Curated Research Library & Source Vault")
-    lib_choice = st.radio("Select Vault:", ["👣 Sightings Database", "🦉 Bioacoustics & Fauna Repertoires", "📰 Press Archives", "🪶 Native American Lore", "🔊 Infrasound Generators"], horizontal=True)
+    st.header("📚 Curated Research Library & Deep Science Vault")
+    st.caption("Comprehensive academic reference, archival scans, and acoustic physics field guides.")
 
-    if "Sightings" in lib_choice:
-        for item in sightings_data[:30]:
-            raw_id = str(item.get('report_id', '')).strip()
-            st.markdown(f"### {item.get('title')} ({item.get('event_date', 'N/A')}) [Weight: {item.get('evidence_weight', 1.0)}x]")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.success("📊 **VERIFIED HARD PHYSICAL FACTS**")
-                st.write(f"**Location:** {item.get('county')}, {item.get('state')} (`{item.get('latitude')}, {item.get('longitude')}`)")
-                st.write(item.get("summary"))
-                if raw_id.isdigit():
-                    st.markdown(f"[📄 View BFRO Report #{raw_id}](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
-            with c2:
-                st.warning("💭 **OBSERVER CONJECTURE & EVALUATION**")
-                st.write(f"**Class Rating:** {item.get('class_rating')} | **Source:** {item.get('source')}")
-            st.markdown("---")
+    lib_choice = st.radio(
+        "Select Vault Section:", 
+        ["🔊 Infrasound Physics & Biology", "👣 BFRO Sightings Database", "🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🦉 Bioacoustics Guide"], 
+        horizontal=True
+    )
 
-    elif "Bioacoustics" in lib_choice:
-        st.markdown("### 🦉 Regional Wildlife Vocal Repertoires")
-        st.markdown("""
-        * **Barred Owl (*Strix varia*):** Expresses up to 13 distinct vocalizations including rhythmic 'cook-whoo' calls, high-pitched caters, and juvenile squawking.
-        * **Eastern Coyote (*Canis latrans*):** Group howl-yips featuring fundamental frequencies from 400 Hz to 1.2 kHz, often creating phantom acoustic harmonics.
-        * **Red Fox (*Vulpes vulpes*):** High-pitched alarm screams and raspy rasp-barks in the 1.5 kHz to 3.5 kHz spectrum often misidentified as hominid vocalizations.
-        * **White-Tailed Deer (*Odocoileus virginianus*):** Explosive high-velocity nasal snorts used for perimeter danger warnings.
-        """)
+    st.markdown("---")
 
-    elif "Press" in lib_choice:
-        for item in media_data:
-            pub_n = item.get('publication_name', item.get('source', 'Historical Archive'))
-            st.markdown(f"#### 📰 {item.get('title')} ({item.get('pub_date')}) [Evidence Weight: {item.get('evidence_weight', 1.2)}x]")
-            st.write(f"**Publication:** {pub_n}")
-            st.write(f"> {item.get('full_text_transcript')}")
-            st.markdown("---")
+    # 1. INFRASOUND CRASH COURSE (CLEAN FORMATTED PARAGRAPHS)
+    if "Infrasound" in lib_choice:
+        st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
+        
+        st.markdown("### 1. What is Infrasound?")
+        st.write(
+            "Infrasound refers to acoustic sound waves that oscillate at frequencies below the human lower limit of audibility—typically "
+            "between 0.1 Hz and 20 Hz. Because these waves possess extremely long wavelengths (ranging from 50 feet up to several miles), "
+            "they interact with the environment in unique ways. High-frequency sound waves like bird calls or human speech are easily "
+            "absorbed by foliage, timber, and terrain barriers. In contrast, infrasonic waves pass through dense forest canopy, timber walls, "
+            "and solid granite with almost zero atmospheric attenuation."
+        )
 
+        st.markdown("### 2. Atmospheric Propagation & Acoustic Ducting")
+        st.write(
+            "Infrasound travels dozens or even hundreds of miles without losing significant acoustic power. At standard audible frequencies "
+            "(1,000 Hz), atmospheric friction rapidly dampens sound over short distances. At sub-audible frequencies (below 10 Hz), atmospheric "
+            "absorption drops to nearly zero. Under low-altitude pressure ceilings or thermal inversions, infrasonic waves bounce between the ground "
+            "and the air layers in a channel called acoustic ducting, allowing low-frequency signals to saturate entire river systems and mountain valleys."
+        )
+
+        st.markdown("### 3. Natural vs. Biological Generators")
+        st.write(
+            "Wilderness infrasound originates from two distinct sources. Abiotic generators include wind-notch mountain passes (where high-velocity "
+            "winds funnel through narrow granite gaps like a giant acoustic whistle at 0.5 to 5 Hz) and hydro-electric dams or high-impact waterfalls "
+            "(producing deep hydraulic rumbles at 3 to 15 Hz). Biological generators include large terrestrial mammals like African elephants, "
+            "tigers, and cassowaries. Hypothesized relict hominids possessing large thoracic volumes could utilize 8 to 18 Hz vocal emissions for "
+            "long-range territorial signaling across vast forest tracts or as an acoustic deterrent against intrusion."
+        )
+
+        st.markdown("### 4. Human Physiological & Neurological Effects")
+        st.write(
+            "When humans enter an active infrasound field without realization, the body reacts physically even though the ears hear no sound. "
+            "Frequencies between 1 and 7 Hz match the internal resonance of human inner ear fluid and vestibular systems, causing sudden dizziness, "
+            "micro-barometric pressure headaches, and disorientation. Frequencies between 7 and 12 Hz overlap with human brain alpha waves, "
+            "inducing acute hyper-vigilance, unexplainable fear, and an intense sensation of being watched. Frequencies around 19 Hz match the "
+            "resonant frequency of the human eyeball, causing subtle ocular vibrations that create peripheral optical smears or shadow-like visual distortions."
+        )
+
+    # 2. BFRO SIGHTINGS WITH DIRECT LINKS
+    elif "BFRO Sightings" in lib_choice:
+        st.subheader("👣 BFRO Sightings Database & Official Field Archives")
+        if sightings_data:
+            st.write(f"Displaying **{len(sightings_data[:30])}** active reports in current sector radius:")
+            for item in sightings_data[:30]:
+                raw_id = str(item.get('report_id', '')).strip()
+                title = item.get('title', 'Sighting Report')
+                date_str = item.get('event_date', 'N/A')
+                weight = item.get('evidence_weight', 1.0)
+                county = item.get('county', 'Unknown County')
+                state = item.get('state', 'Target State')
+                class_rating = item.get('class_rating', 'Class A')
+                summary_text = item.get('summary', 'No summary transcript recorded.')
+
+                st.markdown(f"#### 👣 {title} ({date_str})")
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    st.markdown(f"**Location:** {county}, {state} (`{item.get('latitude')}, {item.get('longitude')}`)")
+                    st.markdown(f"**Classification:** `{class_rating}` | **Evidence Weight:** `{weight}x`")
+                    st.info(f"**Physical Summary:**\n\n{summary_text}")
+                with c2:
+                    if raw_id.isdigit():
+                        st.markdown(f"[📄 **View Full BFRO Report #{raw_id}**](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
+                    else:
+                        st.caption("No official report ID attached.")
+                st.markdown("---")
+        else:
+            st.info("No BFRO sightings currently loaded in active search radius. Expand field radius in sidebar.")
+
+    # 3. INDIGENOUS LORE
     elif "Lore" in lib_choice:
+        st.subheader("🪶 Indigenous Ethnographic Lore & Land Anchors")
+        st.write("Regional tribal records documenting wilderness hominid entities:")
         for item in lore_data:
-            st.markdown(f"#### 🪶 {item.get('tribe_name')} — {item.get('entity_name')} [Evidence Weight: {item.get('evidence_weight', 1.5)}x]")
-            st.write(f"**Region Label:** {item.get('region_label')}")
+            st.markdown(f"#### 🪶 {item.get('tribe_name')} — *{item.get('entity_name')}*")
+            st.write(f"**Region:** `{item.get('region_label')}` | **Evidence Weight:** `{item.get('evidence_weight', 1.5)}x`")
             st.write(item.get("full_narrative"))
             st.markdown("---")
 
-    elif "Infrasound" in lib_choice:
-        st.markdown("### 🔊 Atmospheric Infrasound Generators & Wave Physics")
-        st.markdown("""
-        Infrasound waves oscillate below 20 Hz, bypassing dense foliage and terrain barriers. 
+    # 4. HISTORICAL PRESS ARCHIVES
+    elif "Press Archives" in lib_choice:
+        st.subheader("📰 Historical Press Archives")
+        for item in media_data:
+            pub_name = item.get('publication_name', item.get('source', 'Historical Archive'))
+            st.markdown(f"#### {item.get('title')} ({item.get('pub_date')})")
+            st.write(f"**Source:** `{pub_name}` | **Location:** {item.get('county', 'N/A')}, {item.get('state', 'N/A')}")
+            st.write(f"> {item.get('full_text_transcript')}")
+            st.markdown("---")
 
-        * **Aeolian Wind-Notches:** High winds funneled through mountain passes create continuous standing waves (0.5 to 5 Hz).
-        * **Hydrological Spillways:** High-impact waterfalls and hydro dams generate broad low-frequency rumbles (3 to 15 Hz) reaching up to 80 miles.
-        * **Physiological Resonance:** Human exposure to 18-19 Hz induces inner-ear pressure, eye tissue vibration (shadow distortions), and instinctual dread.
-        """)
+    # 5. BIOACOUSTICS
+    elif "Bioacoustics" in lib_choice:
+        st.subheader("🦉 Bioacoustics & Fauna Repertoires")
+        st.markdown(
+            "* **Barred Owl (*Strix varia*):** Produces caterwauls, screams, and multi-tone hoots.\n"
+            "* **Eastern Coyote (*Canis latrans*):** High-pitched yips and howl-harmonics across valley floors.\n"
+            "* **Red Fox (*Vulpes vulpes*):** Unsettling night alarm screams in the 1.5 kHz to 3.5 kHz range.\n"
+            "* **White-Tailed Deer (*Odocoileus virginianus*):** Loud, explosive blowing snorts used as perimeter warnings."
+        )
