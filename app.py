@@ -22,7 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Auto-detect visitor's location on startup
+# Check for visitor's browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
     device_loc = get_geolocation()
     if device_loc and "coords" in device_loc:
@@ -35,9 +35,16 @@ if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
         st.session_state.user_lon = -70.3000
         st.session_state.location_name = "Default Target Zone"
 
+if "user_state" not in st.session_state:
+    st.session_state.user_state = "Massachusetts"
+if "user_county" not in st.session_state:
+    st.session_state.user_county = "Barnstable County"
+
 lat = float(st.session_state.user_lat)
 lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
+active_state = str(st.session_state.user_state)
+active_county = str(st.session_state.user_county)
 
 # ==========================================
 # CUSTOM BRANDING HEADER BANNER
@@ -137,31 +144,29 @@ def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, com
     return ET.tostring(gpx, encoding="utf-8", method="xml")
 
 # ==========================================
-# 3. HISTORIC TRIBAL TERRITORY POLYGONS
-# ==========================================
-TRIBAL_BOUNDARIES = {
-    "Haudenosaunee / Iroquois": Polygon([(-79.0, 40.5), (-79.0, 46.0), (-71.0, 46.0), (-71.0, 40.5), (-79.0, 40.5)]),
-    "Eastern Band of Cherokee": Polygon([(-85.5, 33.5), (-85.5, 37.0), (-80.5, 37.0), (-80.5, 33.5), (-85.5, 33.5)]),
-    "Coast Salish / Halkomelem": Polygon([(-125.0, 46.5), (-125.0, 50.0), (-121.0, 50.0), (-121.0, 46.5), (-125.0, 46.5)]),
-    "Choctaw Nation": Polygon([(-90.5, 30.5), (-90.5, 35.0), (-87.0, 35.0), (-87.0, 30.5), (-90.5, 30.5)]),
-    "Klamath / Modoc / Yurok": Polygon([(-124.5, 40.0), (-124.5, 44.0), (-120.0, 44.0), (-120.0, 40.0), (-124.5, 40.0)]),
-    "Ojibwe / Anishinaabe": Polygon([(-95.0, 44.0), (-95.0, 50.0), (-80.0, 50.0), (-80.0, 44.0), (-95.0, 44.0)]),
-    "Cree Nation": Polygon([(-120.0, 51.0), (-120.0, 60.0), (-70.0, 60.0), (-70.0, 51.0), (-120.0, 51.0)]),
-    "Tlingit / Athabascan": Polygon([(-155.0, 58.0), (-155.0, 68.0), (-130.0, 68.0), (-130.0, 58.0), (-155.0, 58.0)])
-}
-
-# ==========================================
-# 4. SIDEBAR CONTROLS
+# 3. SIDEBAR CONTROLS & STATE GEOCODING
 # ==========================================
 def geocode_mapbox(query):
     token = st.secrets.get("MAPBOX_TOKEN", "")
     if not token: return None
     url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{requests.utils.quote(query)}.json"
     try:
-        resp = requests.get(url, params={"access_token": token, "limit": 1}, timeout=5)
+        resp = requests.get(url, params={"access_token": token, "limit": 1, "types": "place,locality,address,district,region"}, timeout=5)
         if resp.status_code == 200 and resp.json().get("features"):
             feature = resp.json()["features"][0]
-            return feature["center"][1], feature["center"][0], feature.get("place_name", query)
+            center = feature["center"]
+            place_name = feature.get("place_name", query)
+            
+            # Extract state and county from Mapbox context
+            state = "Massachusetts"
+            county = ""
+            for ctx in feature.get("context", []):
+                if "region" in ctx.get("id", ""):
+                    state = ctx.get("text", state)
+                elif "district" in ctx.get("id", ""):
+                    county = ctx.get("text", county)
+
+            return center[1], center[0], place_name, state, county
     except Exception: pass
     return None
 
@@ -175,7 +180,7 @@ with st.sidebar:
     if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
         res = geocode_mapbox(loc_search)
         if res:
-            st.session_state.user_lat, st.session_state.user_lon, st.session_state.location_name = res
+            st.session_state.user_lat, st.session_state.user_lon, st.session_state.location_name, st.session_state.user_state, st.session_state.user_county = res
             st.rerun()
 
     if col_s2.button("📲 Device GPS", use_container_width=True):
@@ -197,7 +202,7 @@ with st.sidebar:
     show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
 
 # ==========================================
-# 5. TAB NAVIGATION & DATA RETRIEVAL
+# 4. TAB NAVIGATION & CLEAN STATE-BASED DATA RETRIEVAL
 # ==========================================
 tab_map, tab_library = st.tabs(["🗺️ Spatial Analysis Map", "📚 Curated Research Library"])
 
@@ -208,6 +213,7 @@ if supabase:
     lat_min, lat_max = lat - deg_delta, lat + deg_delta
     lon_min, lon_max = lon - deg_delta, lon + deg_delta
 
+    # 1. BFRO Sightings (Spatial Radius)
     try:
         r = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
         sightings_data = r.data or []
@@ -217,6 +223,7 @@ if supabase:
             seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
     except Exception: pass
 
+    # 2. Campsites (Spatial Radius Filter)
     try:
         r = supabase.table("campsites").select("*").execute()
         raw_camps = r.data or []
@@ -225,6 +232,7 @@ if supabase:
                 camps_data.append(c)
     except Exception: pass
 
+    # 3. Acoustic/Infrasound Reports
     try:
         r = supabase.table("acoustic_reports").select("*").execute()
         raw_audio = r.data or []
@@ -246,15 +254,30 @@ if supabase:
                 audio_data.append(a)
     except Exception: pass
 
+    # 4. Historical Media Press Archives (Clean State Index Query)
     try:
-        r = supabase.table("historical_media").select("*").execute()
-        raw_media = r.data or []
-        for m_item in raw_media:
-            if haversine_miles(lat, lon, float(m_item["latitude"]), float(m_item["longitude"])) <= radius_miles:
-                m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
-                media_data.append(m_item)
+        r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
+        media_data = r.data or []
+        if not media_data:
+            # Fallback to general state match
+            r_all = supabase.table("historical_media").select("*").limit(10).execute()
+            media_data = r_all.data or []
+        for m_item in media_data:
+            m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
     except Exception: pass
 
+    # 5. Tribal Lore (Clean State & Region Index Query)
+    try:
+        r = supabase.table("tribal_lore").select("*").ilike("region_label", f"%{active_state}%").execute()
+        lore_data = r.data or []
+        if not lore_data:
+            r_all = supabase.table("tribal_lore").select("*").limit(5).execute()
+            lore_data = r_all.data or []
+        for l_item in lore_data:
+            l_item["evidence_weight"] = float(l_item.get("evidence_weight", 1.5))
+    except Exception: pass
+
+    # 6. Community Field Logs (Spatial Radius Filter)
     try:
         r = supabase.table("investigator_logs").select("*").execute()
         raw_logs = r.data or []
@@ -263,33 +286,15 @@ if supabase:
                 user_logs_data.append(log)
     except Exception: pass
 
-    search_pt = Point(lon, lat)
-    detected_tribes = []
-    for t_name, poly in TRIBAL_BOUNDARIES.items():
-        if poly.contains(search_pt):
-            detected_tribes.append(t_name.split(" / ")[0])
-    
-    try:
-        r = supabase.table("tribal_lore").select("*").execute()
-        all_lore = r.data or []
-        for l_item in all_lore:
-            l_item["evidence_weight"] = float(l_item.get("evidence_weight", 1.5))
-            
-        if detected_tribes:
-            lore_data = [item for item in all_lore if any(dt.lower() in item.get('tribe_name', '').lower() for dt in detected_tribes)]
-        else:
-            lore_data = all_lore[:5]
-    except Exception: pass
-
 # ==========================================
 # TAB 1: SPATIAL ANALYSIS MAP ENGINE
 # ==========================================
 with tab_map:
     st.markdown(f"""
     <div style="background-color:#1e272c; color:white; padding:8px 12px; border-radius:5px; margin-bottom:10px;">
-        <b>📍 Active Sector Records (Within {radius_miles} miles):</b> 
+        <b>📍 Active Sector Records ({loc_name} • {active_state}):</b> 
         👣 Sightings: <code>{len(sightings_data)}</code> | 
-        🪶 Filtered Lore: <code>{len(lore_data)}</code> | 
+        🪶 Regional Lore: <code>{len(lore_data)}</code> | 
         📰 Press Archives: <code>{len(media_data)}</code> | 
         🔊 Intersecting Infrasound Waves: <code>{len(audio_data)}</code> | 
         🏕️ Campsites: <code>{len(camps_data)}</code>
@@ -336,11 +341,6 @@ with tab_map:
         for s in sightings_data:
             if not filter_urban(float(s["latitude"]), float(s["longitude"])):
                 combined_evidence_points.append({"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0))})
-
-    if media_data:
-        for m_item in media_data:
-            if not filter_urban(float(m_item["latitude"]), float(m_item["longitude"])):
-                combined_evidence_points.append({"lat": float(m_item["latitude"]), "lon": float(m_item["longitude"]), "weight": float(m_item.get("evidence_weight", 1.2))})
 
     if show_hotspots and combined_evidence_points:
         coords_arr = np.array([[pt["lat"], pt["lon"]] for pt in combined_evidence_points])
@@ -457,7 +457,7 @@ with tab_map:
                 st.caption("Ecosystem carrying capacity & weighted density hubs.")
                 st.markdown("""
                 * **Evidence Weighting:** Incorporates modern sightings (1.0x), historical press accounts (1.2x), and Indigenous land anchors (1.5x).
-                * **Sustaining Factors:** High-density report clusters serve as an ecological proxy for sector carrying capacity (contiguous canopy, deer/game corridors, year-round water sources).
+                * **Sustaining Factors:** High-density report clusters serve as an ecological proxy for sector carrying capacity.
                 * **Delineation:** Red dotted rings scaling from 5 to 15+ miles centered on weighted cluster hubs.
                 * **Urban Filtering:** Automatically excludes paved urban zones unable to sustain large organisms.
                 """)
@@ -486,33 +486,8 @@ with tab_map:
                 st.warning("### ⚠️ Active Trans-Boundary Infrasound Envelopes")
                 for off in offscreen_sources:
                     st.markdown(f"""
-                    * **{off.get('event_type')}:** Origin sits `{int(off['dist_to_target'])} miles` from target center, but its **{off['prop_radius_miles']}-mile acoustic propagation footprint** extends directly into this search sector (covering ~**{off['coverage_pct']}%** of the local map view).
+                    * **{off.get('event_type')}:** Origin sits `{int(off['dist_to_target'])} miles` from target center, but its **{off['prop_radius_miles']}-mile acoustic propagation footprint** extends directly into this search sector.
                     """)
-
-            st.markdown("---")
-            st.markdown("### 🔊 Infrasound Categories & Physiological Effects")
-            col_inf_def1, col_inf_def2, col_inf_def3 = st.columns(3)
-            with col_inf_def1:
-                st.markdown("#### 🌬️ Aeolian Infrasound")
-                st.caption("Wind-Notch / Mountain Pass Waves")
-                st.markdown("""
-                * **Physics:** High-velocity wind funneling through narrow granite gaps generates standing waves (0.5 - 7.0 Hz).
-                * **Human Symptoms:** Persistent inner-ear pressure, micro-barometric headaches, fatigue, and disorientation.
-                """)
-            with col_inf_def2:
-                st.markdown("#### 🌊 Hydrological Infrasound")
-                st.caption("Waterfalls, Rapids & Hydro Dams")
-                st.markdown("""
-                * **Physics:** High-volume water impact produces low-frequency hydraulic rumbles (3.0 - 15.0 Hz) traveling up to 80 miles.
-                * **Human Symptoms:** Auditory fatigue, masking of ambient forest soundscapes, and subtle ground vibrations near river gorges.
-                """)
-            with col_inf_def3:
-                st.markdown("#### 🦍 Biotic Infrasound")
-                st.caption("Biological Low-Hz Vocalization")
-                st.markdown("""
-                * **Physics:** Sub-audible vocal emissions (8.0 - 18.0 Hz) generated by massive respiratory structures.
-                * **Human Symptoms:** Inner-ear pressure spikes, chest cavity resonance, sudden apprehension, nausea, or hyper-vigilance.
-                """)
 
             st.markdown("---")
             st.markdown("### 🎧 Human Hearing Pitch-Shift Simulator")
@@ -529,8 +504,8 @@ with tab_map:
         with panel_tab3:
             st.write(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
             st.markdown("""
-            * **Owls & Raptors:** Barred Owl (caterwauls, whoops), Great Horned Owl (deep hoots), Eastern Screech-Owl.
-            * **Canids & Predators:** Eastern Coyote (yip-harmonics), Red/Gray Fox (screams), Bobcat / Fisher Cat.
+            * **Owls & Raptors:** Barred Owl (caterwauls, whoops), Great Horned Owl (deep hoots).
+            * **Canids & Predators:** Eastern Coyote (yip-harmonics), Red/Gray Fox (screams).
             * **Mammals:** White-Tailed Deer (alarm snorts), Black Bear (guttural huffs).
             """)
             macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
@@ -540,22 +515,22 @@ with tab_map:
         with panel_tab4:
             c_lore, c_media, c_season = st.columns(3)
             with c_lore:
-                st.markdown("#### 🪶 Isolated Indigenous Accounts")
+                st.markdown(f"#### 🪶 Regional Lore ({active_state})")
                 if lore_data:
                     for item in lore_data:
                         st.write(f"**{item.get('tribe_name')} — {item.get('entity_name')} (Weight: {item.get('evidence_weight', 1.5)}x):**")
                         st.caption(f"> {item.get('full_narrative')}")
                 else:
-                    st.info("No recorded regional indigenous narratives within active target boundary.")
+                    st.info(f"No recorded indigenous narratives specifically indexed for {active_state}.")
             with c_media:
-                st.markdown("#### 📰 Historical Press Archives")
+                st.markdown(f"#### 📰 Press Archives ({active_state})")
                 if media_data:
                     for item in media_data:
                         pub_n = item.get('publication_name', item.get('source', 'Historical Archive'))
                         st.write(f"**{item.get('title')} ({item.get('pub_date')}) [Weight: {item.get('evidence_weight', 1.2)}x]**")
                         st.caption(f"Source: {pub_n} | {item.get('full_text_transcript')[:150]}...")
                 else:
-                    st.info("No historical press accounts tagged within target region.")
+                    st.info(f"No historical press accounts indexed for {active_state}.")
             with c_season:
                 st.markdown("#### 🍂 Seasonal Activity Breakdown")
                 for season_name, count in seasonal_breakdown.items():
@@ -624,7 +599,7 @@ with tab_library:
 
     st.markdown("---")
 
-    # 1. INFRASOUND CRASH COURSE (CLEAN FORMATTED PARAGRAPHS)
+    # 1. INFRASOUND CRASH COURSE
     if "Infrasound" in lib_choice:
         st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
         
