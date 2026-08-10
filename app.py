@@ -25,31 +25,29 @@ st.set_page_config(
 # ==========================================
 # CUSTOM BRANDING HEADER
 # ==========================================
-logo_url = "https://raw.githubusercontent.com/maxpowersbigfoothunter/Bigfoot-gis-map/main/logo.jpg"
-title_url = "https://raw.githubusercontent.com/maxpowersbigfoothunter/Bigfoot-gis-map/main/maxquest_logo.png"
-
 col_logo, col_header = st.columns([1, 5], vertical_alignment="center")
 
 with col_logo:
-    st.image(logo_url, width=120)
+    try:
+        st.image("logo.jpg", width=120)
+    except Exception:
+        try:
+            st.image("logo.png", width=120)
+        except Exception:
+            st.write("👣")
 
 with col_header:
-    st.image(title_url, use_container_width=True)
+    try:
+        st.image("maxquest_logo.png", use_container_width=True)
+    except Exception:
+        try:
+            st.image("maxquest_logo.jpg", use_container_width=True)
+        except Exception:
+            st.title("Maxquest")
+            
     st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
 
 st.markdown("---")
-
-if "user_lat" not in st.session_state:
-    st.session_state.user_lat = 41.7000
-if "user_lon" not in st.session_state:
-    st.session_state.user_lon = -70.3000
-if "location_name" not in st.session_state:
-    st.session_state.location_name = "Massachusetts Target Zone"
-
-lat = float(st.session_state.user_lat)
-lon = float(st.session_state.user_lon)
-loc_name = str(st.session_state.location_name)
-
 # ==========================================
 # 2. SUPABASE CONNECTION & UTILITIES
 # ==========================================
