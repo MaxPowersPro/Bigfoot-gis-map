@@ -22,8 +22,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("👣 Bigfoot Field Analysis & Curation Platform")
-st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
+# ==========================================
+# CUSTOM BRANDING HEADER
+# ==========================================
+logo_url = "https://raw.githubusercontent.com/maxpowersbigfoothunter/Bigfoot-gis-map/main/logo.jpg"
+title_url = "https://raw.githubusercontent.com/maxpowersbigfoothunter/Bigfoot-gis-map/main/maxquest_logo.png"
+
+col_logo, col_header = st.columns([1, 5], vertical_alignment="center")
+
+with col_logo:
+    st.image(logo_url, width=120)
+
+with col_header:
+    st.image(title_url, use_container_width=True)
+    st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
+
+st.markdown("---")
 
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = 41.7000
