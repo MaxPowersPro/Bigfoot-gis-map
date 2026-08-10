@@ -22,12 +22,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-if "user_lat" not in st.session_state:
-    st.session_state.user_lat = 41.7000
-if "user_lon" not in st.session_state:
-    st.session_state.user_lon = -70.3000
-if "location_name" not in st.session_state:
-    st.session_state.location_name = "Massachusetts Target Zone"
+# Check for visitor's browser location on first load
+if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+    device_loc = get_geolocation()
+    if device_loc and "coords" in device_loc:
+        st.session_state.user_lat = device_loc["coords"]["latitude"]
+        st.session_state.user_lon = device_loc["coords"]["longitude"]
+        st.session_state.location_name = "Detected Local Sector"
+    else:
+        # Fallback default if browser GPS is blocked
+        st.session_state.user_lat = 41.7000
+        st.session_state.user_lon = -70.3000
+        st.session_state.location_name = "Default Target Zone"
 
 lat = float(st.session_state.user_lat)
 lon = float(st.session_state.user_lon)
