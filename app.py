@@ -34,30 +34,14 @@ lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
 
 # ==========================================
-# CUSTOM BRANDING HEADER
+# CUSTOM BRANDING HEADER (SINGLE COMBINED BANNER)
 # ==========================================
-col_logo, col_header = st.columns([1, 4], vertical_alignment="center")
+try:
+    st.image("image.png", use_container_width=True)
+except Exception:
+    st.title("Maxquest")
 
-with col_logo:
-    try:
-        st.image("logo.jpg", width=140)
-    except Exception:
-        try:
-            st.image("logo.png", width=140)
-        except Exception:
-            st.write("👣")
-
-with col_header:
-    try:
-        st.image("maxquest_logo.png", width=550)
-    except Exception:
-        try:
-            st.image("maxquest_logo.jpg", width=550)
-        except Exception:
-            st.title("Maxquest")
-            
-    st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
-
+st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
 st.markdown("---")
 # ==========================================
 # 2. SUPABASE CONNECTION & UTILITIES
