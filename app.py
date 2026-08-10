@@ -36,27 +36,15 @@ loc_name = str(st.session_state.location_name)
 # ==========================================
 # CUSTOM BRANDING HEADER
 # ==========================================
-col_logo, col_header = st.columns([1, 5], vertical_alignment="center")
-
-with col_logo:
-    try:
-        st.image("logo.jpg", width=120)
-    except Exception:
-        try:
-            st.image("logo.png", width=120)
-        except Exception:
-            st.write("👣")
-
-with col_header:
-    try:
-        st.image("maxquest_logo.png", use_container_width=True)
-    except Exception:
-        try:
-            st.image("maxquest_logo.jpg", use_container_width=True)
-        except Exception:
-            st.title("Maxquest")
-            
-    st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
+st.markdown("""
+<div style="display: flex; align-items: center; gap: 20px; width: 100%; margin-bottom: 5px;">
+    <img src="https://raw.githubusercontent.com/maxpowersbigfoothunter/Bigfoot-gis-map/main/logo.jpg" style="height: 110px; width: auto; border-radius: 12px; object-fit: contain;">
+    <div style="flex-grow: 1;">
+        <img src="https://raw.githubusercontent.com/maxpowersbigfoothunter/Bigfoot-gis-map/main/maxquest_logo.png" style="height: 110px; width: auto; object-fit: contain; display: block;">
+        <p style="margin: 4px 0 0 0; color: #888; font-size: 14px;">Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 
