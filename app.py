@@ -599,9 +599,7 @@ with tab_library:
 
     st.markdown("---")
 
-    # --------------------------------------------------
-    # 1. INDIGENOUS LORE & CROSS-CULTURAL PATTERN MATCHING
-    # --------------------------------------------------
+    # 1. INDIGENOUS LORE
     if "Lore" in lib_choice or "Indigenous" in lib_choice:
         st.subheader("🪶 Indigenous Ethnographic Lore & Cross-Cultural Pattern Finder")
         
@@ -615,7 +613,6 @@ with tab_library:
                 default=[]
             )
 
-        # Pull data based on selected scope
         if search_scope == "🌐 Nationwide Database (All Regions)" and supabase:
             try:
                 r_all = supabase.table("tribal_lore").select("*").execute()
@@ -637,7 +634,6 @@ with tab_library:
                 full_text = item.get('full_narrative', 'No narrative record transcript available.')
                 ref_url = item.get('reference_url')
 
-                # Simple keyword matching for behavioral traits
                 found_traits = []
                 low_text = full_text.lower()
                 if "rock" in low_text or "stone" in low_text: found_traits.append("🪨 Rock Throwing")
@@ -645,7 +641,6 @@ with tab_library:
                 if "mimic" in low_text or "fauna" in low_text: found_traits.append("🗣️ Vocal Mimicry")
                 if "swamp" in low_text or "river" in low_text or "bog" in low_text: found_traits.append("🌊 Waterway / Swamp Traversal")
 
-                # Filter display if specific tags are selected
                 if behavior_tag:
                     match_needed = any(tag.lower().split()[0] in low_text for tag in behavior_tag)
                     if not match_needed:
@@ -665,9 +660,7 @@ with tab_library:
         else:
             st.info("No indigenous lore records found matching the current filters.")
 
-    # --------------------------------------------------
-    # 2. HISTORICAL PRESS ARCHIVES & PRE-INTERNET MEDIA
-    # --------------------------------------------------
+    # 2. HISTORICAL PRESS ARCHIVES
     elif "Press" in lib_choice:
         st.subheader("📰 Historical Press Archives & Pre-Internet Media Scans")
         
@@ -697,9 +690,7 @@ with tab_library:
         else:
             st.info("No historical press accounts currently indexed for this region.")
 
-    # --------------------------------------------------
     # 3. INFRASOUND CRASH COURSE
-    # --------------------------------------------------
     elif "Infrasound" in lib_choice:
         st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
         st.caption("A field reference manual on sub-audible acoustic mechanics and human neurological resonance.")
@@ -726,9 +717,7 @@ with tab_library:
             "* **18.0 - 19.0 Hz:** Ocular eyeball resonance (18.9 Hz visual peripheral smears / shadow artifacts)."
         )
 
-    # --------------------------------------------------
     # 4. BFRO FIELD REPORTS
-    # --------------------------------------------------
     elif "Sightings" in lib_choice or "BFRO" in lib_choice:
         st.subheader("👣 BFRO Field Sightings & Official Report Vault")
         if sightings_data:
@@ -739,7 +728,6 @@ with tab_library:
                 if raw_id.isdigit():
                     st.markdown(f"[📄 **View Full BFRO Report #{raw_id}**](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
                 st.markdown("---")
-
   # --------------------------------------------------
     # INFRASOUND CRASH COURSE (PARAGRAPH-DRIVEN EDUCATIONAL VAULT)
     # --------------------------------------------------
