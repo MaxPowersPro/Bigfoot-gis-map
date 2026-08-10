@@ -22,6 +22,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+if "user_lat" not in st.session_state:
+    st.session_state.user_lat = 41.7000
+if "user_lon" not in st.session_state:
+    st.session_state.user_lon = -70.3000
+if "location_name" not in st.session_state:
+    st.session_state.location_name = "Massachusetts Target Zone"
+
+lat = float(st.session_state.user_lat)
+lon = float(st.session_state.user_lon)
+loc_name = str(st.session_state.location_name)
+
 # ==========================================
 # CUSTOM BRANDING HEADER
 # ==========================================
@@ -48,6 +59,7 @@ with col_header:
     st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
 
 st.markdown("---")
+
 # ==========================================
 # 2. SUPABASE CONNECTION & UTILITIES
 # ==========================================
