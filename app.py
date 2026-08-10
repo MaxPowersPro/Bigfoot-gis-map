@@ -599,43 +599,64 @@ with tab_library:
 
     st.markdown("---")
 
-    # 1. INFRASOUND CRASH COURSE
-    if "Infrasound" in lib_choice:
+    # --------------------------------------------------
+    # INFRASOUND CRASH COURSE (PARAGRAPH-DRIVEN EDUCATIONAL VAULT)
+    # --------------------------------------------------
+    elif "Infrasound" in lib_choice:
         st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
+        st.caption("A field reference manual on sub-audible acoustic mechanics and human neurological resonance.")
         
-        st.markdown("### 1. What is Infrasound?")
+        st.markdown("### 1. Fundamentals of Infrasonic Acoustic Waves")
         st.write(
             "Infrasound refers to acoustic sound waves that oscillate at frequencies below the human lower limit of audibility—typically "
-            "between 0.1 Hz and 20 Hz. Because these waves possess extremely long wavelengths (ranging from 50 feet up to several miles), "
-            "they interact with the environment in unique ways. High-frequency sound waves like bird calls or human speech are easily "
-            "absorbed by foliage, timber, and terrain barriers. In contrast, infrasonic waves pass through dense forest canopy, timber walls, "
-            "and solid granite with almost zero atmospheric attenuation."
+            "defined as 0.1 Hz to 20 Hz. Because these waves possess extremely long physical wavelengths (ranging from 50 feet up to several miles), "
+            "they interact with the natural environment in ways fundamentally different from audible sound. High-frequency sound waves, such as bird calls "
+            "or human speech, are rapidly absorbed and scattered by foliage, timber, and terrain contours. In contrast, infrasonic waves pass through "
+            "dense forest canopy, timber walls, and solid granite ridge structures with almost zero atmospheric attenuation."
         )
 
-        st.markdown("### 2. Atmospheric Propagation & Acoustic Ducting")
+        st.markdown("### 2. Atmospheric Propagation & Wave Ducting")
         st.write(
-            "Infrasound travels dozens or even hundreds of miles without losing significant acoustic power. At standard audible frequencies "
-            "(1,000 Hz), atmospheric friction rapidly dampens sound over short distances. At sub-audible frequencies (below 10 Hz), atmospheric "
-            "absorption drops to nearly zero. Under low-altitude pressure ceilings or thermal inversions, infrasonic waves bounce between the ground "
-            "and the air layers in a channel called acoustic ducting, allowing low-frequency signals to saturate entire river systems and mountain valleys."
+            "The primary reason infrasound is critical to field analytics is its capability to travel vast distances (40 to 100+ miles) without "
+            "losing significant acoustic amplitude. At standard audible frequencies (1,000 Hz), atmospheric friction dampens sound over short distances. "
+            "However, at sub-audible frequencies (below 10 Hz), atmospheric absorption drops to nearly zero. Under specific meteorological conditions—such "
+            "as thermal inversions or low-altitude pressure ceilings—infrasonic waves bounce repeatedly between the earth's surface and atmospheric layers "
+            "in a channel known as acoustic ducting. This enables low-frequency signals to saturate entire river valleys and wilderness corridors."
         )
 
-        st.markdown("### 3. Natural vs. Biological Generators")
+        st.markdown("### 3. Natural Environmental vs. Biological Generators")
         st.write(
-            "Wilderness infrasound originates from two distinct sources. Abiotic generators include wind-notch mountain passes (where high-velocity "
-            "winds funnel through narrow granite gaps like a giant acoustic whistle at 0.5 to 5 Hz) and hydro-electric dams or high-impact waterfalls "
-            "(producing deep hydraulic rumbles at 3 to 15 Hz). Biological generators include large terrestrial mammals like African elephants, "
-            "tigers, and cassowaries. Hypothesized relict hominids possessing large thoracic volumes could utilize 8 to 18 Hz vocal emissions for "
-            "long-range territorial signaling across vast forest tracts or as an acoustic deterrent against intrusion."
+            "Wilderness infrasound generators fall into two distinct categories. Abiotic (environmental) sources include wind-notch mountain passes, "
+            "where high-velocity surface winds funneling through narrow granite gaps act as massive natural Helmholtz resonators, generating continuous "
+            "low-frequency standing waves (0.5 to 5.0 Hz). High-impact waterfalls and hydroelectric spillways produce deep hydraulic impact rumbles "
+            "(3 to 15 Hz) that create localized acoustic masking envelopes.\n\n"
+            "Biological sources include large terrestrial mammals such as African elephants, tigers, and cassowaries, which utilize deep laryngeal "
+            "structures or vocal folds to produce high-amplitude sub-audible vocalizations. Hypothesized relict hominids possessing large thoracic volumes "
+            "could utilize 8 to 18 Hz vocal bursts for two biological functions: long-range territorial signaling across vast forest tracts, and potential "
+            "defensive acoustic incapacitation of competitors or human observers."
         )
 
         st.markdown("### 4. Human Physiological & Neurological Effects")
         st.write(
-            "When humans enter an active infrasound field without realization, the body reacts physically even though the ears hear no sound. "
-            "Frequencies between 1 and 7 Hz match the internal resonance of human inner ear fluid and vestibular systems, causing sudden dizziness, "
-            "micro-barometric pressure headaches, and disorientation. Frequencies between 7 and 12 Hz overlap with human brain alpha waves, "
-            "inducing acute hyper-vigilance, unexplainable fear, and an intense sensation of being watched. Frequencies around 19 Hz match the "
-            "resonant frequency of the human eyeball, causing subtle ocular vibrations that create peripheral optical smears or shadow-like visual distortions."
+            "When humans enter an active infrasound envelope without realizing it, the body reacts physically even though the ears register no sound. "
+            "This phenomenon—often called the 'Vicinity Effect' or 'Awe/Dread State'—occurs because sub-audible sound waves vibrate human internal organs "
+            "and fluid cavities:\n\n"
+            "* **1.0 Hz to 7.0 Hz (Inner Ear & Vestibular Resonance):** Matches the resonant frequency of human inner ear fluid, causing sudden "
+            "unexplainable dizziness, micro-barometric pressure headaches, fatigue, and loss of physical equilibrium.\n"
+            "* **7.0 Hz to 12.0 Hz (Central Nervous System Resonance):** Overlaps directly with human brain alpha wave frequencies (8 to 12 Hz). "
+            "Prolonged exposure triggers acute hyper-vigilance, irrational apprehension, a strong sensation of coldness, and an intense feeling of being watched.\n"
+            "* **18.0 Hz to 19.0 Hz (Ocular Eyeball Resonance):** Exactly matches the resonant frequency of the human eyeball (18.9 Hz). Exposure at this "
+            "specific pitch causes the eyeball tissue to vibrate subtly, creating visual smear artifacts, peripheral optical illusions (often described "
+            "as 'shadow figures'), and blurred spatial depth perception.\n"
+            "* **50 Hz to 100 Hz Harmonics (Chest Wall Pressure):** Audible upper harmonics accompanying infrasound bursts physically vibrate human chest wall "
+            "tissue, producing a feeling of intense thoracic pressure or breathlessness."
+        )
+
+        st.markdown("### 5. Field Identification & Signal Processing Protocols")
+        st.write(
+            "When deploying low-frequency acoustic hardware or micro-barometers in field sectors:\n\n"
+            "1. **Filter High-Frequency Surface Wind:** Always cover microphone diaphragms with porous foam or micro-wind damping tubes to eliminate surface gusts from corrupting low-frequency baseline logs.\n"
+            "2. **Cross-Reference Geomorphic Features:** Before classifying an infrasound spike as biological, cross-reference local map layers for wind-notch mountain passes, river gorges, or dams within a 60-mile radius."
         )
 
    # --------------------------------------------------
