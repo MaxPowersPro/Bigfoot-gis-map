@@ -638,32 +638,37 @@ with tab_library:
             "resonant frequency of the human eyeball, causing subtle ocular vibrations that create peripheral optical smears or shadow-like visual distortions."
         )
 
-    # 2. BFRO SIGHTINGS WITH DIRECT LINKS
-    elif "BFRO Sightings" in lib_choice:
-        st.subheader("👣 BFRO Sightings Database & Official Field Archives")
+   # --------------------------------------------------
+    # BFRO SIGHTINGS WITH DIRECT OFFICIAL REPORT LINKS
+    # --------------------------------------------------
+    elif "Sightings" in lib_choice or "BFRO" in lib_choice:
+        st.subheader("👣 BFRO Field Sightings & Official Report Vault")
+        st.caption("Curated field reports with direct links to official database archives.")
+
         if sightings_data:
-            st.write(f"Displaying **{len(sightings_data[:30])}** active reports in current sector radius:")
-            for item in sightings_data[:30]:
+            st.write(f"Displaying **{len(sightings_data[:25])}** active reports in current sector radius:")
+            for item in sightings_data[:25]:
                 raw_id = str(item.get('report_id', '')).strip()
                 title = item.get('title', 'Sighting Report')
-                date_str = item.get('event_date', 'N/A')
+                event_date = item.get('event_date', 'N/A')
+                class_rating = item.get('class_rating', 'Class A')
                 weight = item.get('evidence_weight', 1.0)
                 county = item.get('county', 'Unknown County')
-                state = item.get('state', 'Target State')
-                class_rating = item.get('class_rating', 'Class A')
-                summary_text = item.get('summary', 'No summary transcript recorded.')
+                state = item.get('state', 'Sector State')
+                summary_text = item.get('summary', 'No transcript summary recorded.')
 
-                st.markdown(f"#### 👣 {title} ({date_str})")
+                st.markdown(f"#### 👣 {title} ({event_date})")
                 c1, c2 = st.columns([3, 1])
                 with c1:
                     st.markdown(f"**Location:** {county}, {state} (`{item.get('latitude')}, {item.get('longitude')}`)")
                     st.markdown(f"**Classification:** `{class_rating}` | **Evidence Weight:** `{weight}x`")
-                    st.info(f"**Physical Summary:**\n\n{summary_text}")
+                    st.info(f"**Physical Observation Summary:**\n\n{summary_text}")
                 with c2:
                     if raw_id.isdigit():
-                        st.markdown(f"[📄 **View Full BFRO Report #{raw_id}**](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
+                        bfro_url = f"https://www.bfro.net/GDB/show_report.asp?id={raw_id}"
+                        st.markdown(f"[📄 **View Full BFRO Report #{raw_id}**]({bfro_url})")
                     else:
-                        st.caption("No official report ID attached.")
+                        st.caption("No direct online report ID associated.")
                 st.markdown("---")
         else:
             st.info("No BFRO sightings currently loaded in active search radius. Expand field radius in sidebar.")
