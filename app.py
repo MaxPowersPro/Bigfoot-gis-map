@@ -585,19 +585,160 @@ with tab_map:
         )
 
 # ==========================================
-# TAB 2: RESEARCH LIBRARY & SOURCE VAULT
+# TAB 2: RESEARCH LIBRARY & CROSS-CULTURAL ENGINE
 # ==========================================
 with tab_library:
-    st.header("📚 Curated Research Library & Deep Science Vault")
-    st.caption("Comprehensive academic reference, archival scans, and acoustic physics field guides.")
+    st.header("📚 Curated Research Library & Cross-Cultural Pattern Engine")
+    st.caption("Nationwide ethnographic archives, historical media scans, and behavioral cross-correlation toolsets.")
 
     lib_choice = st.radio(
         "Select Vault Section:", 
-        ["🔊 Infrasound Physics & Biology", "👣 BFRO Sightings Database", "🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🦉 Bioacoustics Guide"], 
+        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🔊 Infrasound Physics & Biology", "👣 BFRO Field Reports"], 
         horizontal=True
     )
 
     st.markdown("---")
+
+    # --------------------------------------------------
+    # 1. INDIGENOUS LORE & CROSS-CULTURAL PATTERN MATCHING
+    # --------------------------------------------------
+    if "Lore" in lib_choice or "Indigenous" in lib_choice:
+        st.subheader("🪶 Indigenous Ethnographic Lore & Cross-Cultural Pattern Finder")
+        
+        c_mode, c_filter = st.columns([1, 2])
+        with c_mode:
+            search_scope = st.radio("Research Scope:", ["📍 Active Map Sector", "🌐 Nationwide Database (All Regions)"], key="lore_scope")
+        with c_filter:
+            behavior_tag = st.multiselect(
+                "Filter Shared Behavioral Traits across Cultures:",
+                ["Rock Throwing", "Wood Knocking / Whistles", "Vocal Mimicry", "Waterway / Swamp Traversal", "Stealth / Bipedal Stride"],
+                default=[]
+            )
+
+        # Pull data based on selected scope
+        if search_scope == "🌐 Nationwide Database (All Regions)" and supabase:
+            try:
+                r_all = supabase.table("tribal_lore").select("*").execute()
+                display_lore = r_all.data or []
+            except Exception:
+                display_lore = lore_data
+        else:
+            display_lore = lore_data
+
+        st.markdown("---")
+        st.write(f"Displaying **{len(display_lore)}** ethnographic records for comparative analysis:")
+
+        if display_lore:
+            for item in display_lore:
+                tribe = item.get('tribe_name', 'Regional Indigenous Tribe')
+                entity = item.get('entity_name', 'Wilderness Entity')
+                state_label = item.get('state', item.get('region_label', 'Active Region'))
+                weight = item.get('evidence_weight', 1.5)
+                full_text = item.get('full_narrative', 'No narrative record transcript available.')
+                ref_url = item.get('reference_url')
+
+                # Simple keyword matching for behavioral traits
+                found_traits = []
+                low_text = full_text.lower()
+                if "rock" in low_text or "stone" in low_text: found_traits.append("🪨 Rock Throwing")
+                if "knock" in low_text or "whistle" in low_text: found_traits.append("🪵 Wood Knocking / Whistles")
+                if "mimic" in low_text or "fauna" in low_text: found_traits.append("🗣️ Vocal Mimicry")
+                if "swamp" in low_text or "river" in low_text or "bog" in low_text: found_traits.append("🌊 Waterway / Swamp Traversal")
+
+                # Filter display if specific tags are selected
+                if behavior_tag:
+                    match_needed = any(tag.lower().split()[0] in low_text for tag in behavior_tag)
+                    if not match_needed:
+                        continue
+
+                st.markdown(f"### 🪶 {tribe} — *{entity}*")
+                st.markdown(f"**Territory / Region:** `{state_label}` | **Evidence Weight:** `{weight}x`")
+                if found_traits:
+                    st.caption("Identified Behavioral Traits: " + " • ".join(found_traits))
+                
+                st.info(f"**Ethnographic Narrative Transcript:**\n\n{full_text}")
+                
+                if ref_url:
+                    st.markdown(f"[🌐 **Official Tribal / State Reference Link**]({ref_url})")
+                
+                st.markdown("---")
+        else:
+            st.info("No indigenous lore records found matching the current filters.")
+
+    # --------------------------------------------------
+    # 2. HISTORICAL PRESS ARCHIVES & PRE-INTERNET MEDIA
+    # --------------------------------------------------
+    elif "Press" in lib_choice:
+        st.subheader("📰 Historical Press Archives & Pre-Internet Media Scans")
+        
+        press_scope = st.radio("Media Scope:", ["📍 Active Map Sector", "🌐 Nationwide Database (All Regions)"], key="press_scope")
+        
+        if press_scope == "🌐 Nationwide Database (All Regions)" and supabase:
+            try:
+                r_media = supabase.table("historical_media").select("*").execute()
+                display_media = r_media.data or []
+            except Exception:
+                display_media = media_data
+        else:
+            display_media = media_data
+
+        st.markdown("---")
+        st.write(f"Displaying **{len(display_media)}** historical newspaper archives:")
+
+        if display_media:
+            for item in display_media:
+                pub_name = item.get('publication_name', 'Historical Newspaper')
+                st.markdown(f"### {item.get('title')} ({item.get('pub_date')})")
+                st.markdown(f"**Publication:** `{pub_name}` | **Location:** {item.get('county', 'N/A')}, {item.get('state', 'N/A')}")
+                st.info(item.get('full_text_transcript'))
+                if item.get("article_url"):
+                    st.markdown(f"[🔗 **Open Direct Library Archive Link**]({item.get('article_url')})")
+                st.markdown("---")
+        else:
+            st.info("No historical press accounts currently indexed for this region.")
+
+    # --------------------------------------------------
+    # 3. INFRASOUND CRASH COURSE
+    # --------------------------------------------------
+    elif "Infrasound" in lib_choice:
+        st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
+        st.caption("A field reference manual on sub-audible acoustic mechanics and human neurological resonance.")
+        
+        st.markdown("### 1. Fundamentals of Infrasonic Acoustic Waves")
+        st.write(
+            "Infrasound refers to acoustic sound waves that oscillate at frequencies below the human lower limit of audibility—typically "
+            "defined as 0.1 Hz to 20 Hz. Because these waves possess extremely long physical wavelengths (ranging from 50 feet up to several miles), "
+            "they interact with the natural environment in ways fundamentally different from audible sound."
+        )
+
+        st.markdown("### 2. Three Core Infrasound Categories & Generators")
+        st.markdown("#### 🌬️ 1. Aeolian Infrasound (Wind-Notch & Pass Waves)")
+        st.write("Generated when high-velocity surface wind funnels through narrow granite gaps (0.5 Hz to 5.0 Hz).")
+        st.markdown("#### 🌊 2. Hydrological Infrasound (Hydraulic River & Dam Rumbles)")
+        st.write("Created by heavy water impact at waterfalls or spillways (3.0 Hz to 15.0 Hz).")
+        st.markdown("#### 🦍 3. Biotic Infrasound (Biological Low-Hz Vocal Emits)")
+        st.write("Produced by large thoracic resonance structures in heavy terrestrial organisms (8.0 Hz to 18.0 Hz).")
+
+        st.markdown("### 3. Human Physiological Effects")
+        st.write(
+            "* **1.0 - 7.0 Hz:** Vestibular inner ear resonance (dizziness, micro-barometric headaches).\n"
+            "* **7.0 - 12.0 Hz:** CNS Alpha wave overlap (acute hyper-vigilance, cold dread, feeling watched).\n"
+            "* **18.0 - 19.0 Hz:** Ocular eyeball resonance (18.9 Hz visual peripheral smears / shadow artifacts)."
+        )
+
+    # --------------------------------------------------
+    # 4. BFRO FIELD REPORTS
+    # --------------------------------------------------
+    elif "Sightings" in lib_choice or "BFRO" in lib_choice:
+        st.subheader("👣 BFRO Field Sightings & Official Report Vault")
+        if sightings_data:
+            for item in sightings_data[:25]:
+                raw_id = str(item.get('report_id', '')).strip()
+                st.markdown(f"#### 👣 {item.get('title')} ({item.get('event_date', 'N/A')})")
+                st.info(item.get('summary', 'No summary transcript recorded.'))
+                if raw_id.isdigit():
+                    st.markdown(f"[📄 **View Full BFRO Report #{raw_id}**](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
+                st.markdown("---")
 
   # --------------------------------------------------
     # INFRASOUND CRASH COURSE (PARAGRAPH-DRIVEN EDUCATIONAL VAULT)
