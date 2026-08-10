@@ -599,7 +599,7 @@ with tab_library:
 
     st.markdown("---")
 
-    # --------------------------------------------------
+  # --------------------------------------------------
     # INFRASOUND CRASH COURSE (PARAGRAPH-DRIVEN EDUCATIONAL VAULT)
     # --------------------------------------------------
     if "Infrasound" in lib_choice:
@@ -624,16 +624,28 @@ with tab_library:
             "in a channel known as acoustic ducting. This enables low-frequency signals to saturate entire river valleys and wilderness corridors."
         )
 
-        st.markdown("### 3. Natural Environmental vs. Biological Generators")
+        st.markdown("### 3. Three Core Infrasound Categories & Generators")
+        
+        st.markdown("#### 🌬️ 1. Aeolian Infrasound (Wind-Notch & Pass Waves)")
         st.write(
-            "Wilderness infrasound generators fall into two distinct categories. Abiotic (environmental) sources include wind-notch mountain passes, "
-            "where high-velocity surface winds funneling through narrow granite gaps act as massive natural Helmholtz resonators, generating continuous "
-            "low-frequency standing waves (0.5 to 5.0 Hz). High-impact waterfalls and hydroelectric spillways produce deep hydraulic impact rumbles "
-            "(3 to 15 Hz) that create localized acoustic masking envelopes.\n\n"
-            "Biological sources include large terrestrial mammals such as African elephants, tigers, and cassowaries, which utilize deep laryngeal "
-            "structures or vocal folds to produce high-amplitude sub-audible vocalizations. Hypothesized relict hominids possessing large thoracic volumes "
-            "could utilize 8 to 18 Hz vocal bursts for two biological functions: long-range territorial signaling across vast forest tracts, and potential "
-            "defensive acoustic incapacitation of competitors or human observers."
+            "Generated when high-velocity surface wind funnels through narrow granite gaps, mountain saddles, or deep ridge notches. "
+            "These geographic structures act as giant natural Helmholtz resonators, producing continuous standing waves between **0.5 Hz and 5.0 Hz**. "
+            "Aeolian infrasound dominates high-elevation saddles and ridge passes during major barometric weather shifts."
+        )
+
+        st.markdown("#### 🌊 2. Hydrological Infrasound (Hydraulic River & Dam Rumbles)")
+        st.write(
+            "Created by heavy, high-volume water impact at the base of large waterfalls, river rapids, or hydroelectric spillways. "
+            "Oscillating between **3.0 Hz and 15.0 Hz**, these hydraulic rumbles travel up to 80 miles along river valleys, creating persistent "
+            "sub-audible acoustic masking envelopes that obscure natural forest soundscapes."
+        )
+
+        st.markdown("#### 🦍 3. Biotic Infrasound (Biological Low-Hz Vocal Emits)")
+        st.write(
+            "Produced by large-capacity thoracic resonance structures and specialized laryngeal folds in heavy terrestrial organisms "
+            "(such as African elephants, tigers, and cassowaries). Emitted as high-amplitude, sub-audible vocal bursts between **8.0 Hz and 18.0 Hz**, "
+            "hypothesized relict hominids could utilize these acoustic signals for two primary functions: long-range territorial signaling across "
+            "vast forest tracts, and defensive acoustic disorientation of intruders."
         )
 
         st.markdown("### 4. Human Physiological & Neurological Effects")
@@ -658,7 +670,6 @@ with tab_library:
             "1. **Filter High-Frequency Surface Wind:** Always cover microphone diaphragms with porous foam or micro-wind damping tubes to eliminate surface gusts from corrupting low-frequency baseline logs.\n"
             "2. **Cross-Reference Geomorphic Features:** Before classifying an infrasound spike as biological, cross-reference local map layers for wind-notch mountain passes, river gorges, or dams within a 60-mile radius."
         )
-
    # --------------------------------------------------
     # BFRO SIGHTINGS WITH DIRECT OFFICIAL REPORT LINKS
     # --------------------------------------------------
