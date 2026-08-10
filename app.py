@@ -705,16 +705,33 @@ with tab_library:
         else:
             st.info("No BFRO sightings currently loaded in active search radius. Expand field radius in sidebar.")
 
-    # 3. INDIGENOUS LORE
-    elif "Lore" in lib_choice:
-        st.subheader("🪶 Indigenous Ethnographic Lore & Land Anchors")
-        st.write("Regional tribal records documenting wilderness hominid entities:")
-        for item in lore_data:
-            st.markdown(f"#### 🪶 {item.get('tribe_name')} — *{item.get('entity_name')}*")
-            st.write(f"**Region:** `{item.get('region_label')}` | **Evidence Weight:** `{item.get('evidence_weight', 1.5)}x`")
-            st.write(item.get("full_narrative"))
-            st.markdown("---")
+   # --------------------------------------------------
+    # INDIGENOUS ETHNOGRAPHIC LORE VAULT
+    # --------------------------------------------------
+    elif "Lore" in lib_choice or "Indigenous" in lib_choice:
+        st.subheader("🪶 Indigenous Ethnographic Lore & Historical Land Anchors")
+        st.caption("Archival native narratives detailing regional hominid entities, traditional territory boundaries, and land-use records.")
 
+        if lore_data:
+            for item in lore_data:
+                tribe = item.get('tribe_name', 'Regional Indigenous Tribe')
+                entity = item.get('entity_name', 'Wilderness Entity')
+                state_label = item.get('state', item.get('region_label', 'Active Region'))
+                weight = item.get('evidence_weight', 1.5)
+                full_text = item.get('full_narrative', 'No narrative record transcript available.')
+                ref_url = item.get('reference_url')
+
+                st.markdown(f"### 🪶 {tribe} — *{entity}*")
+                st.markdown(f"**Territory / Region:** `{state_label}` | **Evidence Weight:** `{weight}x`")
+                
+                st.info(f"**Ethnographic Narrative Transcript:**\n\n{full_text}")
+                
+                if ref_url:
+                    st.markdown(f"[🌐 **Official Tribal / State Ethnographic Reference Link**]({ref_url})")
+                
+                st.markdown("---")
+        else:
+            st.info("No indigenous lore records currently indexed for this active target region.")
     # 4. HISTORICAL PRESS ARCHIVES
     elif "Press Archives" in lib_choice:
         st.subheader("📰 Historical Press Archives")
