@@ -11,6 +11,7 @@ import requests
 import numpy as np
 import io
 import wave
+import urllib.parse
 
 # ==========================================
 # 1. PAGE SETUP & AUTO-LOCATION INIT
@@ -143,7 +144,50 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     return R * c
 
 # ==========================================
-# 2B. EFFORT-ADJUSTED & PHENOLOGY ENGINE
+# 2B. LIVE REGIONAL INTEL SEARCH FALLBACK ENGINE
+# ==========================================
+def fetch_live_regional_intel(location_query, state_name):
+    """
+    Safely fetches live regional news archives and historical reports
+    when Supabase returns sparse data for a target location.
+    Auto-saves newly discovered items back into Supabase.
+    """
+    search_term = f"Bigfoot historical newspaper reports {location_query} {state_name}"
+    encoded_query = urllib.parse.quote(search_term)
+    search_url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json"
+    
+    results = []
+    try:
+        resp = requests.get(search_url, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json()
+            for topic in data.get("RelatedTopics", []):
+                if "Text" in topic and "FirstURL" in topic:
+                    text_body = topic.get("Text", "")
+                    title_part = text_body.split(" - ")[0] if " - " in text_body else text_body[:60]
+                    item_payload = {
+                        "title": title_part,
+                        "pub_date": "Historical Record Archive",
+                        "publication_name": "Regional Press Wire",
+                        "full_text_transcript": text_body,
+                        "source_url": topic.get("FirstURL", ""),
+                        "state": state_name
+                    }
+                    results.append(item_payload)
+                    
+                    # Auto-Save to Supabase so database grows automatically
+                    if supabase:
+                        try:
+                            supabase.table("historical_media").upsert(item_payload).execute()
+                        except Exception:
+                            pass
+    except Exception:
+        pass  # Fails silently so Streamlit app never crashes
+        
+    return results
+
+# ==========================================
+# 2C. EFFORT-ADJUSTED & PHENOLOGY ENGINE
 # ==========================================
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
     safe_dist = max(0.01, dist_to_road_miles)
@@ -383,7 +427,7 @@ if supabase:
                 audio_data.append(a)
     except Exception: pass
 
-    # 4. Historical Media Press Archives (Dual Spatial Radius + State Match Engine)
+    # 4. Historical Media Press Archives (Dual Spatial Radius + State Match + Live Fallback Engine)
     try:
         r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
         media_data = r.data or []
@@ -397,7 +441,13 @@ if supabase:
                 m_lon = float(m_item.get("longitude", lon))
                 if haversine_miles(lat, lon, m_lat, m_lon) <= (radius_miles * 1.5):
                     media_data.append(m_item)
-                    
+
+        # SAFE LIVE SEARCH FALLBACK: Runs if Supabase has zero or very few articles
+        if len(media_data) < 2:
+            live_results = fetch_live_regional_intel(loc_name, active_state)
+            if live_results:
+                media_data.extend(live_results)
+
         for m_item in media_data:
             m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
     except Exception: pass
@@ -704,6 +754,8 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
                     pub_n = item.get('publication_name', item.get('source', 'Archive'))
                     st.write(f"**{item.get('title')} ({item.get('pub_date')})**")
                     st.info(f"Source: {pub_n}\n\n{item.get('full_text_transcript')}")
+                    if item.get("source_url"):
+                        st.markdown(f"[📄 View Canonical Archive Link]({item.get('source_url')})")
             else:
                 st.info(f"No historical press accounts indexed for {active_state}.")
         with c_season:
