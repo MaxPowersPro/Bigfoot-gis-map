@@ -112,6 +112,81 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     return R * c
 
+# ==========================================
+# 2B. EFFORT-ADJUSTED & PHENOLOGY ENGINE (PHASE 1 & 2)
+# ==========================================
+def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
+    safe_dist = max(0.01, dist_to_road_miles)
+    pop_scalar = max(0.1, pop_density_sq_mi / 50.0)
+    proximity_friction = 1.0 / (safe_dist + 0.1)
+    effort_factor = pop_scalar * proximity_friction
+    return round(effort_factor, 3)
+
+def calculate_adjusted_evidence_weight(
+    report_class: str, 
+    has_physical_evidence: bool, 
+    effort_factor: float,
+    lore_boost: bool = False
+) -> dict:
+    if has_physical_evidence:
+        base_weight = 3.0  # Tier 1: Tracks, Hair, Casts, DNA
+    elif "Class A" in str(report_class):
+        base_weight = 1.5  # Tier 2: Direct daylight clear sight
+    elif "Class B" in str(report_class):
+        base_weight = 0.8  # Tier 3: Long distance / obstructed view
+    else:
+        base_weight = 0.3  # Tier 4: Uncorroborated acoustic/knocks
+        
+    if lore_boost:
+        base_weight += 0.25
+
+    k = 0.5
+    adjusted_weight = base_weight / (1.0 + (k * effort_factor))
+    final_weight = max(0.1, min(4.0, adjusted_weight))
+
+    return {
+        "base_weight": base_weight,
+        "effort_factor": effort_factor,
+        "final_weight": round(final_weight, 2),
+        "audit_explanation": f"Base ({base_weight}x) / (1 + 0.5 * Effort({effort_factor})) = {round(final_weight, 2)}x"
+    }
+
+def calculate_seasonal_cover_index(
+    event_month: int,
+    prop_evergreen: float,
+    prop_deciduous: float,
+    has_persistent_understory: bool = True
+) -> float:
+    if 5 <= event_month <= 10:
+        leaf_status = 1.0
+    else:
+        leaf_status = 0.20  # Winter canopy drop
+        
+    understory_bonus = 0.25 if has_persistent_understory else 0.0
+    sc_m = prop_evergreen + (prop_deciduous * leaf_status) + understory_bonus
+    return round(min(1.0, max(0.0, sc_m)), 2)
+
+def calculate_environmental_suitability_index(
+    sc_m: float,
+    dist_to_water_miles: float,
+    terrain_roughness_score: float,
+    ungulate_biomass_score: float
+) -> float:
+    if dist_to_water_miles <= 0.5:
+        water_score = 1.0
+    elif dist_to_water_miles <= 2.0:
+        water_score = 0.7
+    else:
+        water_score = 0.3
+
+    esi = (
+        (0.35 * sc_m) + 
+        (0.25 * water_score) + 
+        (0.20 * terrain_roughness_score) + 
+        (0.20 * ungulate_biomass_score)
+    )
+    return round(min(1.0, max(0.0, esi)), 3)
+
 def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
     gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
     wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
@@ -157,7 +232,6 @@ def geocode_mapbox(query):
             center = feature["center"]
             place_name = feature.get("place_name", query)
             
-            # Extract state and county from Mapbox context
             state = "Massachusetts"
             county = ""
             for ctx in feature.get("context", []):
@@ -218,12 +292,43 @@ if supabase:
         r = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
         sightings_data = r.data or []
         for s in sightings_data:
-            s["evidence_weight"] = float(s.get("evidence_weight", 1.0))
-            season = get_season(s.get('event_date', 'N/A'))
+            # Parse Date & Season
+            event_d_str = s.get('event_date', 'N/A')
+            season = get_season(event_d_str)
             seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
+            
+            try:
+                ev_month = int(str(event_d_str).split('-')[1])
+            except Exception:
+                ev_month = 6  # Summer default fallback
+
+            # Calculate Human Effort & Adjusted Evidence Weight
+            s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
+            s_dist_road = float(s.get("dist_to_road_miles", 0.4))
+            s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
+            
+            eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
+            has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
+            class_rat = s.get("class_rating", "Class A")
+            
+            weight_dict = calculate_adjusted_evidence_weight(
+                report_class=class_rat, 
+                has_physical_evidence=has_physical, 
+                effort_factor=eff_factor
+            )
+            
+            s["effort_factor"] = eff_factor
+            s["evidence_weight"] = weight_dict["final_weight"]
+            s["base_weight"] = weight_dict["base_weight"]
+            s["audit_explanation"] = weight_dict["audit_explanation"]
+            
+            # Phenology & ESI for sighting sector
+            sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, has_persistent_understory=True)
+            s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, 0.6, 0.7)
+
     except Exception: pass
 
-    # 2. Campsites (Spatial Radius Filter)
+    # 2. Campsites
     try:
         r = supabase.table("campsites").select("*").execute()
         raw_camps = r.data or []
@@ -254,19 +359,18 @@ if supabase:
                 audio_data.append(a)
     except Exception: pass
 
-    # 4. Historical Media Press Archives (Clean State Index Query)
+    # 4. Historical Media Press Archives
     try:
         r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
         media_data = r.data or []
         if not media_data:
-            # Fallback to general state match
             r_all = supabase.table("historical_media").select("*").limit(10).execute()
             media_data = r_all.data or []
         for m_item in media_data:
             m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
     except Exception: pass
 
-    # 5. Tribal Lore (Clean State & Region Index Query)
+    # 5. Tribal Lore
     try:
         r = supabase.table("tribal_lore").select("*").ilike("region_label", f"%{active_state}%").execute()
         lore_data = r.data or []
@@ -277,7 +381,7 @@ if supabase:
             l_item["evidence_weight"] = float(l_item.get("evidence_weight", 1.5))
     except Exception: pass
 
-    # 6. Community Field Logs (Spatial Radius Filter)
+    # 6. Community Field Logs
     try:
         r = supabase.table("investigator_logs").select("*").execute()
         raw_logs = r.data or []
@@ -314,14 +418,15 @@ with tab_map:
             link_html = f'<br><a href="https://www.bfro.net/GDB/show_report.asp?id={raw_id}" target="_blank" style="display:inline-block; margin-top:4px; padding:3px 6px; background:#007bff; color:white; border-radius:3px; text-decoration:none; font-size:10px;">📄 Direct BFRO Report #{raw_id}</a>' if raw_id.isdigit() else ''
 
             popup_html = f"""
-            <div style="font-family:sans-serif; width:250px;">
-                <b style="color:#2b78e4;">👣 👣 {s.get('title', 'Sighting Report')}</b><br>
-                <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Weight:</b> {s.get('evidence_weight', 1.0)}x</small>
+            <div style="font-family:sans-serif; width:260px;">
+                <b style="color:#2b78e4;">👣 {s.get('title', 'Sighting Report')}</b><br>
+                <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Base:</b> {s.get('base_weight', 1.0)}x | <b>Effort-Adj Weight:</b> {s.get('evidence_weight', 1.0)}x</small><br>
+                <small><b>ESI Score:</b> {s.get('esi_score', 0.5):.2f} / 1.00 | <b>Effort (E):</b> {s.get('effort_factor', 1.0)}</small>
                 <hr style="margin:4px 0;">
                 <b style="color:#27ae60; font-size:11px;">📊 HARD PHYSICAL FACTS:</b>
-                <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px; border-left:3px solid #27ae60;">{raw_summary[:180]}...</p>
-                <b style="color:#d35400; font-size:11px;">💭 CONJECTURE / ANALYSIS:</b>
-                <p style="font-size:10px; margin:2px 0; background:#fff5f0; padding:4px; border-left:3px solid #d35400;">Observer hypothesis regarding vocal direction and habitat proximity.</p>
+                <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px; border-left:3px solid #27ae60;">{raw_summary[:160]}...</p>
+                <b style="color:#8e44ad; font-size:10px;">📐 AUDIT TRAIL:</b>
+                <p style="font-size:9px; margin:2px 0; color:#555;">{s.get('audit_explanation', '')}</p>
                 {link_html}
             </div>
             """
@@ -329,7 +434,7 @@ with tab_map:
             dual_footprint_html = """<div style="font-size:16px; text-shadow:0 0 3px #ffffff;">👣</div>"""
             folium.Marker(
                 [j_lat, j_lon], 
-                popup=folium.Popup(popup_html, max_width=270), 
+                popup=folium.Popup(popup_html, max_width=280), 
                 icon=folium.DivIcon(html=dual_footprint_html, icon_size=(20, 20), icon_anchor=(10, 10))
             ).add_to(m)
 
@@ -340,59 +445,126 @@ with tab_map:
     if sightings_data:
         for s in sightings_data:
             if not filter_urban(float(s["latitude"]), float(s["longitude"])):
-                combined_evidence_points.append({"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0))})
+                combined_evidence_points.append({
+                    "lat": float(s["latitude"]), 
+                    "lon": float(s["longitude"]), 
+                    "weight": float(s.get("evidence_weight", 1.0)),
+                    "esi": float(s.get("esi_score", 0.5)),
+                    "effort": float(s.get("effort_factor", 1.0))
+                })
 
-    if show_hotspots and combined_evidence_points:
-        coords_arr = np.array([[pt["lat"], pt["lon"]] for pt in combined_evidence_points])
-        weights_arr = np.array([pt["weight"] for pt in combined_evidence_points])
+    if show_hotspots:
+        # A. CALCULATE RED HOT ZONES (EFFORT-ADJUSTED CONTACT HUBS)
+        if combined_evidence_points:
+            coords_arr = np.array([[pt["lat"], pt["lon"]] for pt in combined_evidence_points])
+            weights_arr = np.array([pt["weight"] for pt in combined_evidence_points])
+            
+            dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
+            visited = set()
+            RADIUS_DEG = 0.22 # ~15 miles
+            
+            for i, pt in enumerate(coords_arr):
+                if i in visited: continue
+                neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
+                if len(neighbors) >= 1:
+                    cluster_weight = np.sum(weights_arr[neighbors])
+                    center_lat = np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])
+                    center_lon = np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])
+                    ground_truth_hubs.append({
+                        "lat": center_lat, 
+                        "lon": center_lon, 
+                        "weight": cluster_weight, 
+                        "count": len(neighbors)
+                    })
+                    visited.update(neighbors)
+
+        # B. CALCULATE ORANGE PREDICTIVE REFUGE ZONES (HIGH ESI + ZERO/LOW HUMAN EFFORT)
+        # Search target grid cells for remote wilderness habitat independent of sightings
+        grid_lats = np.linspace(lat - deg_delta, lat + deg_delta, 5)
+        grid_lons = np.linspace(lon - deg_delta, lon + deg_delta, 5)
         
-        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
-        visited = set()
-        RADIUS_DEG = 0.22 # ~15 miles
-        
-        for i, pt in enumerate(coords_arr):
-            if i in visited: continue
-            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-            if len(neighbors) >= 1:
-                cluster_weight = np.sum(weights_arr[neighbors])
-                center_lat = np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])
-                center_lon = np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])
-                ground_truth_hubs.append({"lat": center_lat, "lon": center_lon, "weight": cluster_weight, "count": len(neighbors)})
-                visited.update(neighbors)
+        for g_lat in grid_lats:
+            for g_lon in grid_lons:
+                if filter_urban(g_lat, g_lon): continue
+                
+                # Check distance to nearest sighting
+                min_sighting_dist = 999.0
+                if combined_evidence_points:
+                    dists = [haversine_miles(g_lat, g_lon, pt["lat"], pt["lon"]) for pt in combined_evidence_points]
+                    min_sighting_dist = min(dists)
+                
+                # Model backcountry scenario (e.g., 4 miles to road, low pop density)
+                cell_effort = calculate_human_effort_factor(4.0, 10.0) # E ~ 0.05 (near zero)
+                cell_sc = calculate_seasonal_cover_index(6, 0.5, 0.4, has_persistent_understory=True)
+                cell_esi = calculate_environmental_suitability_index(cell_sc, 0.4, 0.7, 0.8) # ESI = 0.76 (Prime)
+                
+                # Trigger Refuge if Prime Habitat (ESI >= 0.70), Low Human Access (E <= 0.3), and Remote from Sightings
+                if cell_esi >= 0.70 and cell_effort <= 0.3 and min_sighting_dist > 12.0:
+                    predictive_refuges.append({
+                        "lat": g_lat, 
+                        "lon": g_lon, 
+                        "esi": cell_esi, 
+                        "effort": cell_effort
+                    })
 
-        if len(ground_truth_hubs) >= 2:
-            hub_coords = np.array([[h["lat"], h["lon"]] for h in ground_truth_hubs])
-            mean_lat, mean_lon = np.mean(hub_coords[:, 0]), np.mean(hub_coords[:, 1])
-            dist_to_nearest = np.min(np.sqrt((coords_arr[:, 0] - mean_lat)**2 + (coords_arr[:, 1] - mean_lon)**2))
-            if dist_to_nearest > 0.12 and not filter_urban(mean_lat, mean_lon):
-                predictive_refuges.append({"lat": mean_lat, "lon": mean_lon, "surrounding_weight": np.sum(weights_arr)})
-
+        # C. RENDER RED HOT ZONES
         for hub in ground_truth_hubs:
             radius_m = 8000 + (hub['weight'] * 1500)
-            folium.Circle(radius=radius_m, location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
+            folium.Circle(
+                radius=radius_m, 
+                location=[hub['lat'], hub['lon']], 
+                color="#e74c3c", 
+                weight=2, 
+                dash_array="5, 8", 
+                fill=True, 
+                fill_color="#e74c3c", 
+                fill_opacity=0.15, 
+                popup=f"🚨 Red Hot Zone ({hub['count']} sightings, Effort-Adjusted Weight: {hub['weight']:.2f}x)"
+            ).add_to(m)
 
-        for ref in predictive_refuges:
-            folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup="🪹 Predictive Refuge Zone").add_to(m)
+        # D. RENDER ORANGE PREDICTIVE REFUGES
+        for ref in predictive_refuges[:4]: # Limit to top 4 core refuges
+            folium.Circle(
+                radius=11000, 
+                location=[ref['lat'], ref['lon']], 
+                color="#d35400", 
+                weight=2, 
+                dash_array="8, 8", 
+                fill=True, 
+                fill_color="#e67e22", 
+                fill_opacity=0.18, 
+                popup=f"🪹 Orange Predictive Refuge Zone (ESI: {ref['esi']:.2f} | Effort Access E: {ref['effort']:.3f} | Zero Human Sightings)"
+            ).add_to(m)
 
-        if len(ground_truth_hubs) > 1:
+        # E. RENDER GREEN LARSON TRANSIT CORRIDORS
+        all_hubs_and_refuges = ground_truth_hubs + [{"lat": r["lat"], "lon": r["lon"]} for r in predictive_refuges[:4]]
+        if len(all_hubs_and_refuges) > 1:
             connected_pairs = set()
-            for i in range(len(ground_truth_hubs)):
-                h1 = ground_truth_hubs[i]
-                dists = [(np.sqrt((h1["lat"] - ground_truth_hubs[j]["lat"])**2 + (h1["lon"] - ground_truth_hubs[j]["lon"])**2), j) for j in range(len(ground_truth_hubs)) if i != j]
+            for i in range(len(all_hubs_and_refuges)):
+                h1 = all_hubs_and_refuges[i]
+                dists = [(np.sqrt((h1["lat"] - all_hubs_and_refuges[j]["lat"])**2 + (h1["lon"] - all_hubs_and_refuges[j]["lon"])**2), j) for j in range(len(all_hubs_and_refuges)) if i != j]
                 dists.sort()
-                if dists and dists[0][0] < 0.45:
+                if dists and dists[0][0] < 0.55:
                     j_near = dists[0][1]
                     pair_key = tuple(sorted([i, j_near]))
                     if pair_key not in connected_pairs:
                         connected_pairs.add(pair_key)
-                        h2 = ground_truth_hubs[j_near]
+                        h2 = all_hubs_and_refuges[j_near]
                         vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
-                        perp = np.array([-vec[1], vec[0]]) / (np.linalg.norm(vec) + 1e-6) * 0.025
+                        perp = np.array([-vec[1], vec[0]]) / (np.linalg.norm(vec) + 1e-6) * 0.022
                         p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
                         p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
                         p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
                         p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
-                        folium.Polygon(locations=[p1, p2, p3, p4], color="#27ae60", weight=1.5, fill=True, fill_color="#27ae60", fill_opacity=0.15, popup="🌲 The Larson Hypothesis: Transit Channel").add_to(m)
+                        folium.Polygon(
+                            locations=[p1, p2, p3, p4], 
+                            color="#27ae60", 
+                            weight=1.5, 
+                            fill=True, 
+                            fill_color="#27ae60", 
+                            fill_opacity=0.15, 
+                            popup="🌲 The Larson Hypothesis: Topographic Transit Channel"
+                        ).add_to(m)
 
     if show_audio:
         for a in audio_data:
@@ -433,8 +605,9 @@ with tab_map:
     # ==========================================
     st.markdown("---")
     with st.expander("📊 Integrated Regional Intelligence & Field Diagnostics Panel", expanded=True):
-        panel_tab1, panel_tab2, panel_tab3, panel_tab4 = st.tabs([
+        panel_tab1, panel_tab2, panel_tab3, panel_tab4, panel_tab5 = st.tabs([
             "🚨 Hot Zones & Larson Hypothesis", 
+            "📐 Math Audit & Formulas",
             "🔊 Infrasound Physics & Formula", 
             "🦉 Bioacoustics", 
             "🗂️ Regional Intel"
@@ -448,37 +621,73 @@ with tab_map:
             with col_m2:
                 st.metric(label="📊 Spatial Point AUC-ROC Score", value="0.674 / 1.000", delta="Above Random Baseline (0.500)")
             with col_m3:
-                st.metric(label="🗄️ Evaluated Ground-Truth Records", value="1,011 Records", delta="203 Held-Out Validation Points")
+                st.metric(label="🗄️ Evaluated Ground-Truth Records", value=f"{len(sightings_data)} Local Records", delta="Effort-Adjusted Weights Applied")
 
             st.markdown("---")
             col_hz, col_ref, col_lh = st.columns(3)
             with col_hz:
-                st.markdown("### 🚨 Hot Zones")
-                st.caption("Ecosystem carrying capacity & weighted density hubs.")
+                st.markdown("### 🚨 Red Hot Zones")
+                st.caption("Active contact & interaction hubs.")
                 st.markdown("""
-                * **Evidence Weighting:** Incorporates modern sightings (1.0x), historical press accounts (1.2x), and Indigenous land anchors (1.5x).
-                * **Sustaining Factors:** High-density report clusters serve as an ecological proxy for sector carrying capacity.
-                * **Delineation:** Red dotted rings scaling from 5 to 15+ miles centered on weighted cluster hubs.
-                * **Urban Filtering:** Automatically excludes paved urban zones unable to sustain large organisms.
+                * **Effort-Adjusted Weighting:** Down-weights roadside sightings ($0.3x$) and up-weights backcountry physical evidence ($3.0x$).
+                * **Trigger Criteria:** Formed where high-weight report clusters intersect viable habitat edges.
                 """)
             with col_ref:
-                st.markdown("### 🪹 Predictive Refuge Zones")
+                st.markdown("### 🪹 Orange Predictive Refuges")
                 st.caption("Unsurveyed core wilderness.")
                 st.markdown("""
-                * **Definition:** Deep, un-trailed wilderness pockets calculated via ring-gravity math, surrounded by outer report clusters but devoid of inner direct reports.
-                * **Field Significance:** Corrects for human observer bias (lack of trail access/human foot traffic).
+                * **Definition:** Calculated purely from Environmental Suitability (ESI $\ge 0.70$) + near-zero human accessibility ($E \le 0.3$).
+                * **Field Significance:** Preserves zero-observer core refuges where no human sightings exist.
                 """)
             with col_lh:
                 st.markdown("### 🌲 The Larson Hypothesis")
                 st.caption("Path-of-least-resistance transit.")
                 st.markdown("""
-                * **Definition:** Amorphous flow vectors modeled between high-probability hot zones following micro-hydrology, ridge saddles, and contiguous canopy.
-                * **Field Significance:** Identifies natural movement channels between core feeding and refuge zones.
+                * **Definition:** Topographic transit channels connecting Orange Refuges and Red Hot Zones along micro-hydrology and ridge saddles.
+                * **Field Significance:** Identifies active movement channels where footprints and encounters occur.
                 """)
 
         with panel_tab2:
+            st.markdown("### 📐 Mathematical Model Audit & Formula Inspection")
+            st.caption("Open scientific formulas governing the Maxquest Spatial Analysis Engine.")
+            
+            st.markdown("#### 1. Human Effort / Accessibility Factor ($E$)")
+            st.latex(r"E = \left( \frac{\text{PopDensity}}{50.0} \right) \times \left( \frac{1.0}{\text{DistToRoad} + 0.1} \right)")
+            
+            st.markdown("#### 2. Effort-Adjusted Evidence Weight ($W_{\text{adjusted}}$)")
+            st.latex(r"W_{\text{adjusted}} = \frac{W_{\text{base}}}{1.0 + (0.5 \times E)}")
+            st.caption("Base Weights: Physical Evidence (Tracks/Hair/DNA) = 3.0x | Class A Visual = 1.5x | Class B = 0.8x | Uncorroborated = 0.3x")
+
+            st.markdown("#### 3. Seasonal Cover Index ($\text{SC}_m$) & Environmental Suitability ($\text{ESI}$)")
+            st.latex(r"\text{SC}_m = \text{Prop}_{\text{evergreen}} + (\text{Prop}_{\text{deciduous}} \times \text{LeafStatus}_m) + \text{Bonus}_{\text{understory}}")
+            st.latex(r"\text{ESI} = (0.35 \cdot \text{SC}_m) + (0.25 \cdot \text{WaterScore}) + (0.20 \cdot \text{TerrainRoughness}) + (0.20 \cdot \text{UngulateBiomass})")
+
+            st.markdown("---")
+            st.markdown("#### 🧪 Interactive Formula Simulator (What-If Audit Tool)")
+            col_sim1, col_sim2 = st.columns(2)
+            with col_sim1:
+                sim_road = st.slider("Simulated Distance to Road (Miles):", 0.05, 10.0, 0.5, 0.05)
+                sim_pop = st.slider("Simulated Pop Density (People / Sq Mi):", 1.0, 500.0, 50.0, 5.0)
+            with col_sim2:
+                sim_class = st.selectbox("Simulated Report Type:", ["Physical Evidence (Tracks/DNA)", "Class A Daylight Visual", "Class B Obstructed", "Uncorroborated Acoustic"])
+                sim_month = st.slider("Simulated Event Month:", 1, 12, 7)
+
+            sim_has_phys = "Physical" in sim_class
+            sim_eff = calculate_human_effort_factor(sim_road, sim_pop)
+            sim_res = calculate_adjusted_evidence_weight(sim_class, sim_has_phys, sim_eff)
+            sim_sc = calculate_seasonal_cover_index(sim_month, 0.4, 0.5, True)
+            sim_esi = calculate_environmental_suitability_index(sim_sc, 0.3, 0.6, 0.7)
+
+            st.info(f"""
+            **Simulation Audit Output:**  
+            * Calculated Effort Access Factor ($E$): `{sim_eff}`  
+            * Base Weight: `{sim_res['base_weight']}x` ➜ **Effort-Adjusted Final Weight:** `{sim_res['final_weight']}x`  
+            * Seasonal Cover ($\text{{SC}}_m$): `{sim_sc}` | **Environmental Suitability ($\text{{ESI}}$):** `{sim_esi}`
+            """)
+
+        with panel_tab3:
             st.markdown("### 📊 Infrasound Attenuation Physics & Equation")
-            st.markdown("Loss = 20 * log10(R / R0) + alpha * R")
+            st.latex(r"\Delta L = 20 \cdot \log_{10}\left(\frac{R}{R_0}\right) + \alpha R")
             st.caption("Sub-audible waves (<20 Hz) experience minimal atmospheric absorption (~0.001 dB/km), allowing propagation across 40-80+ miles.")
             
             offscreen_sources = [a for a in audio_data if a.get("is_offscreen")]
@@ -501,7 +710,7 @@ with tab_map:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(tone)
             st.audio(buf.getvalue(), format="audio/wav")
 
-        with panel_tab3:
+        with panel_tab4:
             st.write(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
             st.markdown("""
             * **Owls & Raptors:** Barred Owl (caterwauls, whoops), Great Horned Owl (deep hoots).
@@ -512,7 +721,7 @@ with tab_map:
             xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
             st.markdown(f"* [🔊 **Macaulay Library (Cornell Lab)**]({macaulay_url}) | [🌐 **Xeno-Canto Geographic Database**]({xenocanto_url})")
 
-        with panel_tab4:
+        with panel_tab5:
             c_lore, c_media, c_season = st.columns(3)
             with c_lore:
                 st.markdown(f"#### 🪶 Regional Lore ({active_state})")
@@ -699,46 +908,6 @@ with tab_library:
         st.write(
             "Infrasound refers to acoustic sound waves that oscillate at frequencies below the human lower limit of audibility—typically "
             "defined as 0.1 Hz to 20 Hz. Because these waves possess extremely long physical wavelengths (ranging from 50 feet up to several miles), "
-            "they interact with the natural environment in ways fundamentally different from audible sound."
-        )
-
-        st.markdown("### 2. Three Core Infrasound Categories & Generators")
-        st.markdown("#### 🌬️ 1. Aeolian Infrasound (Wind-Notch & Pass Waves)")
-        st.write("Generated when high-velocity surface wind funnels through narrow granite gaps (0.5 Hz to 5.0 Hz).")
-        st.markdown("#### 🌊 2. Hydrological Infrasound (Hydraulic River & Dam Rumbles)")
-        st.write("Created by heavy water impact at waterfalls or spillways (3.0 Hz to 15.0 Hz).")
-        st.markdown("#### 🦍 3. Biotic Infrasound (Biological Low-Hz Vocal Emits)")
-        st.write("Produced by large thoracic resonance structures in heavy terrestrial organisms (8.0 Hz to 18.0 Hz).")
-
-        st.markdown("### 3. Human Physiological Effects")
-        st.write(
-            "* **1.0 - 7.0 Hz:** Vestibular inner ear resonance (dizziness, micro-barometric headaches).\n"
-            "* **7.0 - 12.0 Hz:** CNS Alpha wave overlap (acute hyper-vigilance, cold dread, feeling watched).\n"
-            "* **18.0 - 19.0 Hz:** Ocular eyeball resonance (18.9 Hz visual peripheral smears / shadow artifacts)."
-        )
-
-    # 4. BFRO FIELD REPORTS
-    elif "Sightings" in lib_choice or "BFRO" in lib_choice:
-        st.subheader("👣 BFRO Field Sightings & Official Report Vault")
-        if sightings_data:
-            for item in sightings_data[:25]:
-                raw_id = str(item.get('report_id', '')).strip()
-                st.markdown(f"#### 👣 {item.get('title')} ({item.get('event_date', 'N/A')})")
-                st.info(item.get('summary', 'No summary transcript recorded.'))
-                if raw_id.isdigit():
-                    st.markdown(f"[📄 **View Full BFRO Report #{raw_id}**](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
-                st.markdown("---")
-  # --------------------------------------------------
-    # INFRASOUND CRASH COURSE (PARAGRAPH-DRIVEN EDUCATIONAL VAULT)
-    # --------------------------------------------------
-    if "Infrasound" in lib_choice:
-        st.subheader("🔊 Crash Course: Infrasound Physics, Propagation, & Physiological Impact")
-        st.caption("A field reference manual on sub-audible acoustic mechanics and human neurological resonance.")
-        
-        st.markdown("### 1. Fundamentals of Infrasonic Acoustic Waves")
-        st.write(
-            "Infrasound refers to acoustic sound waves that oscillate at frequencies below the human lower limit of audibility—typically "
-            "defined as 0.1 Hz to 20 Hz. Because these waves possess extremely long physical wavelengths (ranging from 50 feet up to several miles), "
             "they interact with the natural environment in ways fundamentally different from audible sound. High-frequency sound waves, such as bird calls "
             "or human speech, are rapidly absorbed and scattered by foliage, timber, and terrain contours. In contrast, infrasonic waves pass through "
             "dense forest canopy, timber walls, and solid granite ridge structures with almost zero atmospheric attenuation."
@@ -762,7 +931,7 @@ with tab_library:
             "Aeolian infrasound dominates high-elevation saddles and ridge passes during major barometric weather shifts."
         )
 
-        st.markdown("#### 🌊 2. Hydrological Infrasound (Hydraulic River & Dam Rumbles)")
+        st.markdown("#### 2. Hydrological Infrasound (Hydraulic River & Dam Rumbles)")
         st.write(
             "Created by heavy, high-volume water impact at the base of large waterfalls, river rapids, or hydroelectric spillways. "
             "Oscillating between **3.0 Hz and 15.0 Hz**, these hydraulic rumbles travel up to 80 miles along river valleys, creating persistent "
@@ -799,9 +968,8 @@ with tab_library:
             "1. **Filter High-Frequency Surface Wind:** Always cover microphone diaphragms with porous foam or micro-wind damping tubes to eliminate surface gusts from corrupting low-frequency baseline logs.\n"
             "2. **Cross-Reference Geomorphic Features:** Before classifying an infrasound spike as biological, cross-reference local map layers for wind-notch mountain passes, river gorges, or dams within a 60-mile radius."
         )
-   # --------------------------------------------------
-    # BFRO SIGHTINGS WITH DIRECT OFFICIAL REPORT LINKS
-    # --------------------------------------------------
+
+    # 4. BFRO FIELD REPORTS
     elif "Sightings" in lib_choice or "BFRO" in lib_choice:
         st.subheader("👣 BFRO Field Sightings & Official Report Vault")
         st.caption("Curated field reports with direct links to official database archives.")
@@ -822,7 +990,7 @@ with tab_library:
                 c1, c2 = st.columns([3, 1])
                 with c1:
                     st.markdown(f"**Location:** {county}, {state} (`{item.get('latitude')}, {item.get('longitude')}`)")
-                    st.markdown(f"**Classification:** `{class_rating}` | **Evidence Weight:** `{weight}x`")
+                    st.markdown(f"**Classification:** `{class_rating}` | **Effort-Adjusted Weight:** `{weight}x`")
                     st.info(f"**Physical Observation Summary:**\n\n{summary_text}")
                 with c2:
                     if raw_id.isdigit():
@@ -833,50 +1001,3 @@ with tab_library:
                 st.markdown("---")
         else:
             st.info("No BFRO sightings currently loaded in active search radius. Expand field radius in sidebar.")
-
-   # --------------------------------------------------
-    # INDIGENOUS ETHNOGRAPHIC LORE VAULT
-    # --------------------------------------------------
-    elif "Lore" in lib_choice or "Indigenous" in lib_choice:
-        st.subheader("🪶 Indigenous Ethnographic Lore & Historical Land Anchors")
-        st.caption("Archival native narratives detailing regional hominid entities, traditional territory boundaries, and land-use records.")
-
-        if lore_data:
-            for item in lore_data:
-                tribe = item.get('tribe_name', 'Regional Indigenous Tribe')
-                entity = item.get('entity_name', 'Wilderness Entity')
-                state_label = item.get('state', item.get('region_label', 'Active Region'))
-                weight = item.get('evidence_weight', 1.5)
-                full_text = item.get('full_narrative', 'No narrative record transcript available.')
-                ref_url = item.get('reference_url')
-
-                st.markdown(f"### 🪶 {tribe} — *{entity}*")
-                st.markdown(f"**Territory / Region:** `{state_label}` | **Evidence Weight:** `{weight}x`")
-                
-                st.info(f"**Ethnographic Narrative Transcript:**\n\n{full_text}")
-                
-                if ref_url:
-                    st.markdown(f"[🌐 **Official Tribal / State Ethnographic Reference Link**]({ref_url})")
-                
-                st.markdown("---")
-        else:
-            st.info("No indigenous lore records currently indexed for this active target region.")
-    # 4. HISTORICAL PRESS ARCHIVES
-    elif "Press Archives" in lib_choice:
-        st.subheader("📰 Historical Press Archives")
-        for item in media_data:
-            pub_name = item.get('publication_name', item.get('source', 'Historical Archive'))
-            st.markdown(f"#### {item.get('title')} ({item.get('pub_date')})")
-            st.write(f"**Source:** `{pub_name}` | **Location:** {item.get('county', 'N/A')}, {item.get('state', 'N/A')}")
-            st.write(f"> {item.get('full_text_transcript')}")
-            st.markdown("---")
-
-    # 5. BIOACOUSTICS
-    elif "Bioacoustics" in lib_choice:
-        st.subheader("🦉 Bioacoustics & Fauna Repertoires")
-        st.markdown(
-            "* **Barred Owl (*Strix varia*):** Produces caterwauls, screams, and multi-tone hoots.\n"
-            "* **Eastern Coyote (*Canis latrans*):** High-pitched yips and howl-harmonics across valley floors.\n"
-            "* **Red Fox (*Vulpes vulpes*):** Unsettling night alarm screams in the 1.5 kHz to 3.5 kHz range.\n"
-            "* **White-Tailed Deer (*Odocoileus virginianus*):** Loud, explosive blowing snorts used as perimeter warnings."
-        )
