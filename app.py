@@ -427,30 +427,29 @@ if supabase:
                 audio_data.append(a)
     except Exception: pass
 
-    # 4. Historical Media Press Archives (Dual Spatial Radius + State Match + Live Fallback Engine)
+   # 4. Historical Media Press Archives (Spatial Distance Engine)
     try:
-        r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
-        media_data = r.data or []
+        # Step A: Attempt spatial radius query near active target map coordinates
+        r_all = supabase.table("historical_media").select("*").execute()
+        raw_media = r_all.data or []
         
-        # Spatial Radius Fallback: Fetch geographically close articles if state text query returns empty
-        if not media_data:
-            r_all = supabase.table("historical_media").select("*").execute()
-            raw_media = r_all.data or []
-            for m_item in raw_media:
-                m_lat = float(m_item.get("latitude", lat))
-                m_lon = float(m_item.get("longitude", lon))
-                if haversine_miles(lat, lon, m_lat, m_lon) <= (radius_miles * 1.5):
-                    media_data.append(m_item)
+        media_data = []
+        for m_item in raw_media:
+            m_lat = float(m_item.get("latitude", lat))
+            m_lon = float(m_item.get("longitude", lon))
+            # Pulls any record sitting within the selected field search radius (e.g., 100 miles)
+            if haversine_miles(lat, lon, m_lat, m_lon) <= (radius_miles * 1.5):
+                media_data.append(m_item)
 
-        # SAFE LIVE SEARCH FALLBACK: Runs if Supabase has zero or very few articles
-        if len(media_data) < 2:
-            live_results = fetch_live_regional_intel(loc_name, active_state)
-            if live_results:
-                media_data.extend(live_results)
+        # Step B: Fallback to state match if spatial radius returns zero
+        if not media_data:
+            r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
+            media_data = r.data or []
 
         for m_item in media_data:
             m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
-    except Exception: pass
+    except Exception as e:
+        st.error(f"Media Retrieval Error: {e}")
 
     # 5. Tribal Lore (Dual Spatial Radius + State Match Engine)
     try:
