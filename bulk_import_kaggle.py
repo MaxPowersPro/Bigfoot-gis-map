@@ -2,12 +2,11 @@ import pandas as pd
 import streamlit as st
 from supabase import create_client
 
-# Direct web source for the geocoded BFRO dataset
 DATA_URL = "bfro_reports_geocoded.csv"
+
 def run_import():
-    st.write("🚀 Starting bulk import from web source...")
+    st.write("🚀 Starting bulk import from dataset...")
     
-    # 1. Connect using Streamlit Secrets
     try:
         supabase_url = st.secrets["SUPABASE_URL"]
         supabase_key = st.secrets["SUPABASE_KEY"]
@@ -16,23 +15,19 @@ def run_import():
         st.error(f"Failed to connect to Supabase: {e}")
         return
 
-    # 2. Download and parse CSV directly from the web
     try:
+        df = pd.read_csv(DATA_URL, sep=None, engine='python', on_bad_lines='skip')
+    except Exception:
         try:
-    df = pd.read_csv(DATA_URL, sep=None, engine='python', on_bad_lines='skip')
-except Exception:
-    df = pd.read_csv(DATA_URL, sep='\t', engine='python', on_bad_lines='skip')
-        st.write(f"📊 Downloaded {len(df)} raw rows from web dataset.")
-    except Exception as e:
-        st.error(f"Failed to fetch CSV dataset: {e}")
-        return
+            df = pd.read_csv(DATA_URL, sep='\t', engine='python', on_bad_lines='skip')
+        except Exception as e:
+            st.error(f"Failed to parse CSV dataset: {e}")
+            return
 
-    # 3. Clean and map columns
     records = []
     for idx, row in df.iterrows():
         lat = row.get("latitude")
         lon = row.get("longitude")
-        
         if pd.isna(lat) or pd.isna(lon):
             continue
 
@@ -60,7 +55,6 @@ except Exception:
             "has_physical_evidence": "cast" in summary_text.lower() or "dna" in summary_text.lower()
         })
 
-    # 4. Batch upsert into Supabase
     batch_size = 250
     total_inserted = 0
     progress_bar = st.progress(0)
@@ -76,5 +70,5 @@ except Exception:
 
     st.success(f"🔥 SUCCESS! Inserted {total_inserted} geocoded reports into Supabase!")
 
-if __name__ == "__main__":
-    run_import()
+# Automatically trigger execution when loaded
+run_import()
