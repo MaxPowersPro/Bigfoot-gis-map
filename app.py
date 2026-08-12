@@ -13,7 +13,17 @@ import numpy as np
 import io
 import wave
 import urllib.parse
+import streamlit as st
+from data_loader import load_and_standardize_dataset
 
+# Load points automatically from repository bundled assets
+sighting_data = load_and_standardize_dataset("data/bfro_reports.csv")
+
+# Display status banner on your app UI
+if sighting_data:
+    st.sidebar.success(f"📍 Loaded {len(sighting_data):,} sightings into Map Engine")
+else:
+    st.sidebar.warning("⚠️ No points loaded from data/bfro_reports.csv")
 # ==========================================
 # 1. PAGE SETUP & AUTO-LOCATION INIT
 # ==========================================
