@@ -18,7 +18,10 @@ def run_import():
 
     # 2. Download and parse CSV directly from the web
     try:
-        df = pd.read_csv(DATA_URL)
+        try:
+    df = pd.read_csv(DATA_URL, sep=None, engine='python', on_bad_lines='skip')
+except Exception:
+    df = pd.read_csv(DATA_URL, sep='\t', engine='python', on_bad_lines='skip')
         st.write(f"📊 Downloaded {len(df)} raw rows from web dataset.")
     except Exception as e:
         st.error(f"Failed to fetch CSV dataset: {e}")
