@@ -24,14 +24,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Load master local dataset from bundled asset
+# Load local bundled datasets
 raw_bundled_sightings = load_and_standardize_dataset("data/bfro_reports.csv")
-
-# Display status banner on your app UI
-if raw_bundled_sightings:
-    st.sidebar.success(f"📍 Loaded {len(raw_bundled_sightings):,} sightings into Map Engine")
-else:
-    st.sidebar.warning("⚠️ No points loaded from data/bfro_reports.csv")
+raw_bundled_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
+raw_bundled_news = load_and_standardize_dataset("data/press_archives.csv")
 
 # Check for visitor's browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
@@ -111,7 +107,6 @@ def init_supabase():
         key = st.secrets.get("SUPABASE_KEY", "sb_publishable_ydyOYDYfYTKhGHlZv0AqIg_kzs_SKjM")
         return create_client(url, key)
     except Exception as e:
-        st.error(f"⚠️ Supabase Init Failed: {e}")
         return None
 
 supabase: Client = init_supabase()
@@ -319,7 +314,7 @@ with st.sidebar:
 sightings_data, camps_data, audio_data, media_data, lore_data, user_logs_data = [], [], [], [], [], []
 seasonal_breakdown = {}
 
-# Filter local raw sightings within the selected spatial radius
+# Filter local raw sightings
 if raw_bundled_sightings:
     for s in raw_bundled_sightings:
         s_lat = s.get("latitude")
@@ -358,6 +353,16 @@ if raw_bundled_sightings:
                 
                 sightings_data.append(s)
 
+# Load Local Lore if present
+if raw_bundled_lore:
+    for item in raw_bundled_lore:
+        lore_data.append(item.get("metadata", item))
+
+# Load Local Press Archives if present
+if raw_bundled_news:
+    for item in raw_bundled_news:
+        media_data.append(item.get("metadata", item))
+
 if supabase:
     # Campsites
     try:
@@ -390,41 +395,6 @@ if supabase:
                 audio_data.append(a)
     except Exception: pass
 
-    # Historical Media
-    try:
-        r_all = supabase.table("historical_media").select("*").execute()
-        raw_media = r_all.data or []
-        for m_item in raw_media:
-            m_lat = float(m_item.get("latitude", lat))
-            m_lon = float(m_item.get("longitude", lon))
-            if haversine_miles(lat, lon, m_lat, m_lon) <= (radius_miles * 1.5):
-                media_data.append(m_item)
-
-        if not media_data:
-            r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
-            media_data = r.data or []
-
-        for m_item in media_data:
-            m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
-    except Exception: pass
-
-    # Tribal Lore
-    try:
-        r = supabase.table("tribal_lore").select("*").ilike("region_label", f"%{active_state}%").execute()
-        lore_data = r.data or []
-        if not lore_data:
-            r_all = supabase.table("tribal_lore").select("*").execute()
-            raw_lore = r_all.data or []
-            for l_item in raw_lore:
-                l_lat = float(l_item.get("latitude", lat))
-                l_lon = float(l_item.get("longitude", lon))
-                if haversine_miles(lat, lon, l_lat, l_lon) <= (radius_miles * 2.0):
-                    lore_data.append(l_item)
-                    
-        for l_item in lore_data:
-            l_item["evidence_weight"] = float(l_item.get("evidence_weight", 1.5))
-    except Exception: pass
-
     # Community Field Logs
     try:
         r = supabase.table("investigator_logs").select("*").execute()
@@ -439,12 +409,7 @@ if supabase:
 # ==========================================
 st.markdown(f"""
 <div style="background-color:#1e272c; color:white; padding:8px 12px; border-radius:5px; margin-bottom:10px;">
-    <b>📍 Active Sector Records ({loc_name} • {active_state}):</b> 
-    👣 Sightings: <code>{len(sightings_data)}</code> | 
-    🪶 Regional Lore: <code>{len(lore_data)}</code> | 
-    📰 Press Archives: <code>{len(media_data)}</code> | 
-    🔊 Intersecting Infrasound Waves: <code>{len(audio_data)}</code> | 
-    🏕️ Campsites: <code>{len(camps_data)}</code>
+    <b>📍 Active Sector ({loc_name} • {active_state})</b>
 </div>
 """, unsafe_allow_html=True)
 
@@ -697,8 +662,11 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
             st.markdown(f"#### 🪶 Regional Lore ({active_state})")
             if lore_data:
                 for item in lore_data:
-                    st.write(f"**{item.get('tribe_name')} — {item.get('entity_name')}:**")
-                    st.info(f"> {item.get('full_narrative')}")
+                    tribe = item.get('tribe_name', item.get('tribe', 'Indigenous Record'))
+                    entity = item.get('entity_name', item.get('title', 'Entity'))
+                    narrative = item.get('full_narrative', item.get('summary', ''))
+                    st.write(f"**{tribe} — {entity}:**")
+                    st.info(f"> {narrative}")
             else:
                 st.info(f"No recorded indigenous narratives specifically indexed for {active_state}.")
         with c_media:
@@ -706,10 +674,11 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
             if media_data:
                 for item in media_data:
                     pub_n = item.get('publication_name', item.get('source', 'Archive'))
-                    st.write(f"**{item.get('title')} ({item.get('pub_date')})**")
-                    st.info(f"Source: {pub_n}\n\n{item.get('full_text_transcript')}")
-                    if item.get("source_url"):
-                        st.markdown(f"[📄 View Canonical Archive Link]({item.get('source_url')})")
+                    title = item.get('title', item.get('headline', 'Article'))
+                    text = item.get('full_text_transcript', item.get('summary', ''))
+                    p_date = item.get('pub_date', item.get('event_date', 'Historical'))
+                    st.write(f"**{title} ({p_date})**")
+                    st.info(f"Source: {pub_n}\n\n{text}")
             else:
                 st.info(f"No historical press accounts indexed for {active_state}.")
         with c_season:
@@ -775,42 +744,24 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 
     if "Lore" in lib_choice or "Indigenous" in lib_choice:
         st.subheader("🪶 Indigenous Ethnographic Lore & Cross-Cultural Pattern Finder")
-        c_mode, c_filter = st.columns([1, 2])
-        with c_mode:
-            search_scope = st.radio("Research Scope:", ["📍 Active Map Sector", "🌐 Nationwide Database (All Regions)"], key="lore_scope")
-        with c_filter:
-            behavior_tag = st.multiselect(
-                "Filter Shared Behavioral Traits across Cultures:",
-                ["Rock Throwing", "Wood Knocking / Whistles", "Vocal Mimicry", "Waterway / Swamp Traversal", "Stealth / Bipedal Stride"],
-                default=[]
-            )
-
-        display_lore = lore_data if search_scope == "📍 Active Map Sector" else (lore_data or [])
-        if search_scope == "🌐 Nationwide Database (All Regions)" and supabase:
-            try:
-                r_all = supabase.table("tribal_lore").select("*").execute()
-                display_lore = r_all.data or []
-            except Exception: pass
-
-        st.write(f"Displaying **{len(display_lore)}** ethnographic records:")
-        for item in display_lore:
-            st.markdown(f"### 🪶 {item.get('tribe_name')} — *{item.get('entity_name')}*")
-            st.caption(f"> {item.get('full_narrative')}")
+        st.write(f"Displaying **{len(lore_data)}** ethnographic records:")
+        for item in lore_data:
+            tribe = item.get('tribe_name', item.get('tribe', 'Indigenous Record'))
+            entity = item.get('entity_name', item.get('title', 'Entity'))
+            narrative = item.get('full_narrative', item.get('summary', ''))
+            st.markdown(f"### 🪶 {tribe} — *{entity}*")
+            st.caption(f"> {narrative}")
             st.markdown("---")
 
     elif "Press" in lib_choice:
         st.subheader("📰 Historical Press Archives & Media Scans")
-        display_media = media_data
-        if supabase:
-            try:
-                r_media = supabase.table("historical_media").select("*").execute()
-                display_media = r_media.data or []
-            except Exception: pass
-
-        st.write(f"Displaying **{len(display_media)}** newspaper archives:")
-        for item in display_media:
-            st.markdown(f"### {item.get('title')} ({item.get('pub_date')})")
-            st.info(item.get('full_text_transcript'))
+        st.write(f"Displaying **{len(media_data)}** newspaper archives:")
+        for item in media_data:
+            title = item.get('title', item.get('headline', 'Article'))
+            p_date = item.get('pub_date', item.get('event_date', 'Historical'))
+            text = item.get('full_text_transcript', item.get('summary', ''))
+            st.markdown(f"### {title} ({p_date})")
+            st.info(text)
             st.markdown("---")
 
     elif "Infrasound" in lib_choice:
