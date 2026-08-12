@@ -1,13 +1,14 @@
-import bulk_import_kaggle
 import pandas as pd
 import streamlit as st
 from supabase import create_client
 
-DATA_URL = "bfro_reports_geocoded.csv"
+# Direct working URL to the geocoded dataset repository
+DATA_URL = "https://raw.githubusercontent.com/datasets/bigfoot-locations/main/data/bfro_reports_geocoded.csv"
 
 def run_import():
-    st.write("🚀 Starting bulk import from dataset...")
+    st.info("🚀 Starting dataset import directly from the web source...")
     
+    # 1. Connect to Supabase
     try:
         supabase_url = st.secrets["SUPABASE_URL"]
         supabase_key = st.secrets["SUPABASE_KEY"]
@@ -16,19 +17,20 @@ def run_import():
         st.error(f"Failed to connect to Supabase: {e}")
         return
 
+    # 2. Fetch directly from the web URL
     try:
-        df = pd.read_csv(DATA_URL, sep=None, engine='python', on_bad_lines='skip')
-    except Exception:
-        try:
-            df = pd.read_csv(DATA_URL, sep='\t', engine='python', on_bad_lines='skip')
-        except Exception as e:
-            st.error(f"Failed to parse CSV dataset: {e}")
-            return
+        df = pd.read_csv(DATA_URL)
+        st.write(f"📊 Successfully fetched dataset with {len(df)} rows.")
+    except Exception as e:
+        st.error(f"Failed to load dataset from web: {e}")
+        return
 
+    # 3. Clean and structure records
     records = []
     for idx, row in df.iterrows():
         lat = row.get("latitude")
         lon = row.get("longitude")
+        
         if pd.isna(lat) or pd.isna(lon):
             continue
 
@@ -56,7 +58,10 @@ def run_import():
             "has_physical_evidence": "cast" in summary_text.lower() or "dna" in summary_text.lower()
         })
 
-    batch_size = 250
+    st.write(f"⚙️ Formatted {len(records)} geocoded records. Upserting to Supabase...")
+
+    # 4. Batch upsert into Supabase
+    batch_size = 200
     total_inserted = 0
     progress_bar = st.progress(0)
 
@@ -67,9 +72,8 @@ def run_import():
             total_inserted += len(batch)
             progress_bar.progress(min(total_inserted / len(records), 1.0))
         except Exception as e:
-            st.warning(f"Batch insert warning: {e}")
+            st.warning(f"Batch insert error on row {i}: {e}")
 
     st.success(f"🔥 SUCCESS! Inserted {total_inserted} geocoded reports into Supabase!")
 
-# Automatically trigger execution when loaded
 run_import()
