@@ -1,4 +1,5 @@
-import streamlit as st
+import bulk_import_kaggle
+bulk_import_kaggle.run_import()import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from shapely.geometry import Point, Polygon
