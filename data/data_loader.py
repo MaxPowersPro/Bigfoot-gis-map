@@ -4,64 +4,54 @@ import streamlit as st
 
 @st.cache_data
 def load_and_standardize_dataset(file_path):
-    """
-    Reads any CSV file, auto-detects coordinate and text columns,
-    and returns a standardized list of dicts for Map & Library rendering.
-    """
     if not os.path.exists(file_path):
         return []
 
     try:
-        # Flexible loader handling tabs, bad lines, and comma errors
         df = pd.read_csv(file_path, sep=None, engine='python', on_bad_lines='skip')
     except Exception:
+        try:
+            df = pd.read_csv(file_path, sep='\t', engine='python', on_bad_lines='skip')
+        except Exception:
+            return []
+
+    if df.empty:
         return []
 
-    # Lowercase all column headers for easy matching
+    # Clean headers
     df.columns = [str(col).strip().lower() for col in df.columns]
-
-    # Flexible column resolution lists
-    lat_cols = ['latitude', 'lat', 'y', 'lat_deg']
-    lon_cols = ['longitude', 'lon', 'lng', 'x', 'lon_deg']
-    title_cols = ['title', 'headline', 'subject', 'report_id', 'number']
-    text_cols = ['observed', 'summary', 'description', 'text', 'story', 'narrative']
-    date_cols = ['date', 'event_date', 'year', 'timestamp']
-
-    def find_best_col(options, default=None):
-        for opt in options:
-            if opt in df.columns:
-                return opt
-        return default
-
-    col_lat = find_best_col(lat_cols)
-    col_lon = find_best_col(lon_cols)
-    col_title = find_best_col(title_cols)
-    col_text = find_best_col(text_cols)
-    col_date = find_best_col(date_cols)
 
     standardized_records = []
 
     for idx, row in df.iterrows():
-        # Get coordinates
+        # Safely convert coordinates
+        raw_lat = row.get('latitude')
+        raw_lon = row.get('longitude')
+
+        if pd.isna(raw_lat) or pd.isna(raw_lon):
+            continue
+
         try:
-            lat = float(row[col_lat]) if col_lat and pd.notna(row[col_lat]) else None
-            lon = float(row[col_lon]) if col_lon and pd.notna(row[col_lon]) else None
-        except ValueError:
+            lat = float(raw_lat)
+            lon = float(raw_lon)
+        except (ValueError, TypeError):
             continue
 
-        if lat is None or lon is None:
-            continue
+        record_id = str(row.get('number', idx)).split('.')[0]
+        title = str(row.get('title', f"Report #{record_id}"))
+        if title == "nan":
+            title = f"Report #{record_id}"
 
-        # Extract Core Standard Fields
-        record_id = str(row.get('number', row.get('id', idx)))
-        title = str(row[col_title]) if col_title and pd.notna(row[col_title]) else f"Report #{record_id}"
-        summary = str(row[col_text]) if col_text and pd.notna(row[col_text]) else "No narrative recorded."
-        event_date = str(row[col_date]) if col_date and pd.notna(row[col_date]) else "Unknown Date"
+        summary = str(row.get('observed', row.get('summary', "No narrative recorded.")))
+        if summary == "nan":
+            summary = "No narrative recorded."
 
-        # Pack ALL remaining unique/extra columns into a flexible metadata dict
+        event_date = str(row.get('date', "Unknown Date"))
+
+        # Pack weather, season, classification, county, etc. into flexible metadata
         extra_metadata = {}
         for col in df.columns:
-            if col not in [col_lat, col_lon, col_title, col_text, col_date]:
+            if col not in ['latitude', 'longitude', 'title', 'observed', 'summary', 'date']:
                 val = row[col]
                 if pd.notna(val):
                     extra_metadata[col] = str(val)
@@ -73,7 +63,7 @@ def load_and_standardize_dataset(file_path):
             "longitude": lon,
             "event_date": event_date,
             "summary": summary,
-            "metadata": extra_metadata  # Preserves weather, classification, county, etc.
+            "metadata": extra_metadata
         })
 
     return standardized_records
