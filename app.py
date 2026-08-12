@@ -15,6 +15,14 @@ import wave
 import urllib.parse
 import streamlit as st
 from data.data_loader import load_and_standardize_dataset
+# Temporary debug check
+import pandas as pd
+try:
+    test_df = pd.read_csv("data/bfro_reports.csv")
+    st.sidebar.write(f"🔍 Raw CSV rows found: {len(test_df)}")
+    st.sidebar.write(f"📋 Columns: {list(test_df.columns)}")
+except Exception as e:
+    st.sidebar.error(f"File read error: {e}")
 # Load points automatically from repository bundled assets
 sighting_data = load_and_standardize_dataset("data/bfro_reports.csv")
 
