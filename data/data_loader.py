@@ -2,68 +2,46 @@ import os
 import pandas as pd
 import streamlit as st
 
-@st.cache_data
 def load_and_standardize_dataset(file_path):
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔍 Loader Diagnostics")
+    
     if not os.path.exists(file_path):
+        st.sidebar.error(f"❌ File path does not exist: `{file_path}`")
         return []
 
     try:
-        df = pd.read_csv(file_path, sep=None, engine='python', on_bad_lines='skip')
-    except Exception:
-        try:
-            df = pd.read_csv(file_path, sep='\t', engine='python', on_bad_lines='skip')
-        except Exception:
-            return []
-
-    if df.empty:
+        df = pd.read_csv(file_path, engine='python', on_bad_lines='skip')
+        st.sidebar.write(f"📁 Opened file. Total rows: `{len(df)}`")
+    except Exception as e:
+        st.sidebar.error(f"❌ Read failure: {e}")
         return []
 
-    # Clean headers
     df.columns = [str(col).strip().lower() for col in df.columns]
+    st.sidebar.write(f"🏷️ Columns detected: `{list(df.columns)[:5]}...`")
 
-    standardized_records = []
+    # Check coordinate presence
+    if 'latitude' not in df.columns or 'longitude' not in df.columns:
+        st.sidebar.error("❌ 'latitude' or 'longitude' column missing from header.")
+        return []
 
-    for idx, row in df.iterrows():
-        # Safely convert coordinates
-        raw_lat = row.get('latitude')
-        raw_lon = row.get('longitude')
+    # Count valid coordinates
+    valid_coords = df[df['latitude'].notna() & df['longitude'].notna()]
+    st.sidebar.write(f"📍 Rows with non-null lat/lon: `{len(valid_coords)}`")
 
-        if pd.isna(raw_lat) or pd.isna(raw_lon):
-            continue
-
+    records = []
+    for idx, row in valid_coords.iterrows():
         try:
-            lat = float(raw_lat)
-            lon = float(raw_lon)
-        except (ValueError, TypeError):
+            records.append({
+                "id": str(row.get('number', idx)),
+                "title": str(row.get('title', f"Report #{idx}")),
+                "latitude": float(row['latitude']),
+                "longitude": float(row['longitude']),
+                "summary": str(row.get('observed', row.get('summary', ''))),
+                "metadata": row.to_dict()
+            })
+        except Exception:
             continue
 
-        record_id = str(row.get('number', idx)).split('.')[0]
-        title = str(row.get('title', f"Report #{record_id}"))
-        if title == "nan":
-            title = f"Report #{record_id}"
-
-        summary = str(row.get('observed', row.get('summary', "No narrative recorded.")))
-        if summary == "nan":
-            summary = "No narrative recorded."
-
-        event_date = str(row.get('date', "Unknown Date"))
-
-        # Pack weather, season, classification, county, etc. into flexible metadata
-        extra_metadata = {}
-        for col in df.columns:
-            if col not in ['latitude', 'longitude', 'title', 'observed', 'summary', 'date']:
-                val = row[col]
-                if pd.notna(val):
-                    extra_metadata[col] = str(val)
-
-        standardized_records.append({
-            "id": record_id,
-            "title": title,
-            "latitude": lat,
-            "longitude": lon,
-            "event_date": event_date,
-            "summary": summary,
-            "metadata": extra_metadata
-        })
-
-    return standardized_records
+    st.sidebar.success(f"✅ Successfully converted `{len(records)}` records!")
+    return records
