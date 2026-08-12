@@ -1,4 +1,3 @@
-
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
@@ -13,17 +12,8 @@ import numpy as np
 import io
 import wave
 import urllib.parse
-import streamlit as st
 from data.data_loader import load_and_standardize_dataset
 
-# Load points automatically from repository bundled assets
-sighting_data = load_and_standardize_dataset("data/bfro_reports.csv")
-
-# Display status banner on your app UI
-if sighting_data:
-    st.sidebar.success(f"📍 Loaded {len(sighting_data):,} sightings into Map Engine")
-else:
-    st.sidebar.warning("⚠️ No points loaded from data/bfro_reports.csv")
 # ==========================================
 # 1. PAGE SETUP & AUTO-LOCATION INIT
 # ==========================================
@@ -33,6 +23,15 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Load master local dataset from bundled asset
+raw_bundled_sightings = load_and_standardize_dataset("data/bfro_reports.csv")
+
+# Display status banner on your app UI
+if raw_bundled_sightings:
+    st.sidebar.success(f"📍 Loaded {len(raw_bundled_sightings):,} sightings into Map Engine")
+else:
+    st.sidebar.warning("⚠️ No points loaded from data/bfro_reports.csv")
 
 # Check for visitor's browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
@@ -71,7 +70,7 @@ except Exception:
 st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
 
 # ==========================================
-# TOP COLLAPSED APP NAVIGATION & KEY GUIDE (ABOVE MAP)
+# TOP COLLAPSED APP NAVIGATION & KEY GUIDE
 # ==========================================
 with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", expanded=False):
     st.markdown("### 🎓 App Navigation & Field Controls")
@@ -82,7 +81,7 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
         st.write("""
         * **Target Search Area:** Type any city, county, or landmark in the sidebar search box to re-center the analysis map.
         * **Device GPS:** Tap **📲 Device GPS** in the sidebar to lock onto your phone's live location in the field.
-        * **Field Radius:** Select a radius ($25\text{--}500\text{ miles}$) to set your operational search perimeter.
+        * **Field Radius:** Select a radius (25--500 miles) to set your operational search perimeter.
         """)
     with col_g2:
         st.markdown("#### 🗺️ Master Map Key")
@@ -154,52 +153,6 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     return R * c
 
-# ==========================================
-# 2B. LIVE REGIONAL INTEL SEARCH FALLBACK ENGINE
-# ==========================================
-def fetch_live_regional_intel(location_query, state_name):
-    """
-    Safely fetches live regional news archives and historical reports
-    when Supabase returns sparse data for a target location.
-    Auto-saves newly discovered items back into Supabase.
-    """
-    search_term = f"Bigfoot historical newspaper reports {location_query} {state_name}"
-    encoded_query = urllib.parse.quote(search_term)
-    search_url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json"
-    
-    results = []
-    try:
-        resp = requests.get(search_url, timeout=4)
-        if resp.status_code == 200:
-            data = resp.json()
-            for topic in data.get("RelatedTopics", []):
-                if "Text" in topic and "FirstURL" in topic:
-                    text_body = topic.get("Text", "")
-                    title_part = text_body.split(" - ")[0] if " - " in text_body else text_body[:60]
-                    item_payload = {
-                        "title": title_part,
-                        "pub_date": "Historical Record Archive",
-                        "publication_name": "Regional Press Wire",
-                        "full_text_transcript": text_body,
-                        "source_url": topic.get("FirstURL", ""),
-                        "state": state_name
-                    }
-                    results.append(item_payload)
-                    
-                    # Auto-Save to Supabase so database grows automatically
-                    if supabase:
-                        try:
-                            supabase.table("historical_media").upsert(item_payload).execute()
-                        except Exception:
-                            pass
-    except Exception:
-        pass  # Fails silently so Streamlit app never crashes
-        
-    return results
-
-# ==========================================
-# 2C. EFFORT-ADJUSTED & PHENOLOGY ENGINE
-# ==========================================
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
     safe_dist = max(0.01, dist_to_road_miles)
     pop_scalar = max(0.1, pop_density_sq_mi / 50.0)
@@ -214,13 +167,13 @@ def calculate_adjusted_evidence_weight(
     lore_boost: bool = False
 ) -> dict:
     if has_physical_evidence:
-        base_weight = 3.0  # Tier 1: Tracks, Hair, Casts, DNA
+        base_weight = 3.0
     elif "Class A" in str(report_class):
-        base_weight = 1.5  # Tier 2: Direct daylight clear sight
+        base_weight = 1.5
     elif "Class B" in str(report_class):
-        base_weight = 0.8  # Tier 3: Long distance / obstructed view
+        base_weight = 0.8
     else:
-        base_weight = 0.3  # Tier 4: Uncorroborated acoustic/knocks
+        base_weight = 0.3
         
     if lore_boost:
         base_weight += 0.25
@@ -361,53 +314,52 @@ with st.sidebar:
     show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
 
 # ==========================================
-# 4. LOCATION-SPECIFIC SUPABASE DATA RETRIEVAL ENGINE
+# 4. DATA FILTERING ENGINE (LOCAL + SUPABASE)
 # ==========================================
 sightings_data, camps_data, audio_data, media_data, lore_data, user_logs_data = [], [], [], [], [], []
 seasonal_breakdown = {}
 
+# Filter local raw sightings within the selected spatial radius
+if raw_bundled_sightings:
+    for s in raw_bundled_sightings:
+        s_lat = s.get("latitude")
+        s_lon = s.get("longitude")
+        if s_lat is not None and s_lon is not None:
+            if haversine_miles(lat, lon, float(s_lat), float(s_lon)) <= radius_miles:
+                event_d_str = s.get('event_date', 'N/A')
+                season = get_season(event_d_str)
+                seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
+                
+                try:
+                    ev_month = int(str(event_d_str).split('-')[1])
+                except Exception:
+                    ev_month = 6
+
+                s_dist_road = float(s.get("dist_to_road_miles", 0.4))
+                s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
+                
+                eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
+                has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
+                class_rat = s.get("class_rating", "Class A")
+                
+                weight_dict = calculate_adjusted_evidence_weight(
+                    report_class=class_rat, 
+                    has_physical_evidence=has_physical, 
+                    effort_factor=eff_factor
+                )
+                
+                s["effort_factor"] = eff_factor
+                s["evidence_weight"] = weight_dict["final_weight"]
+                s["base_weight"] = weight_dict["base_weight"]
+                s["audit_explanation"] = weight_dict["audit_explanation"]
+                
+                sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, has_persistent_understory=True)
+                s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, 0.6, 0.7)
+                
+                sightings_data.append(s)
+
 if supabase:
-    lat_min, lat_max = lat - deg_delta, lat + deg_delta
-    lon_min, lon_max = lon - deg_delta, lon + deg_delta
-
-    # 1. BFRO Sightings
-    try:
-        r = supabase.table("sighting_reports").select("*").gte("latitude", lat_min).lte("latitude", lat_max).gte("longitude", lon_min).lte("longitude", lon_max).execute()
-        sightings_data = r.data or []
-        for s in sightings_data:
-            event_d_str = s.get('event_date', 'N/A')
-            season = get_season(event_d_str)
-            seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
-            
-            try:
-                ev_month = int(str(event_d_str).split('-')[1])
-            except Exception:
-                ev_month = 6
-
-            s_dist_road = float(s.get("dist_to_road_miles", 0.4))
-            s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
-            
-            eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
-            has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
-            class_rat = s.get("class_rating", "Class A")
-            
-            weight_dict = calculate_adjusted_evidence_weight(
-                report_class=class_rat, 
-                has_physical_evidence=has_physical, 
-                effort_factor=eff_factor
-            )
-            
-            s["effort_factor"] = eff_factor
-            s["evidence_weight"] = weight_dict["final_weight"]
-            s["base_weight"] = weight_dict["base_weight"]
-            s["audit_explanation"] = weight_dict["audit_explanation"]
-            
-            sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, has_persistent_understory=True)
-            s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, 0.6, 0.7)
-
-    except Exception: pass
-
-    # 2. Campsites
+    # Campsites
     try:
         r = supabase.table("campsites").select("*").execute()
         raw_camps = r.data or []
@@ -416,7 +368,7 @@ if supabase:
                 camps_data.append(c)
     except Exception: pass
 
-    # 3. Acoustic/Infrasound Reports
+    # Acoustic/Infrasound Reports
     try:
         r = supabase.table("acoustic_reports").select("*").execute()
         raw_audio = r.data or []
@@ -438,31 +390,25 @@ if supabase:
                 audio_data.append(a)
     except Exception: pass
 
-   # 4. Historical Media Press Archives (Spatial Distance Engine)
+    # Historical Media
     try:
-        # Step A: Attempt spatial radius query near active target map coordinates
         r_all = supabase.table("historical_media").select("*").execute()
         raw_media = r_all.data or []
-        
-        media_data = []
         for m_item in raw_media:
             m_lat = float(m_item.get("latitude", lat))
             m_lon = float(m_item.get("longitude", lon))
-            # Pulls any record sitting within the selected field search radius (e.g., 100 miles)
             if haversine_miles(lat, lon, m_lat, m_lon) <= (radius_miles * 1.5):
                 media_data.append(m_item)
 
-        # Step B: Fallback to state match if spatial radius returns zero
         if not media_data:
             r = supabase.table("historical_media").select("*").ilike("state", f"%{active_state}%").execute()
             media_data = r.data or []
 
         for m_item in media_data:
             m_item["evidence_weight"] = float(m_item.get("evidence_weight", 1.2))
-    except Exception as e:
-        st.error(f"Media Retrieval Error: {e}")
+    except Exception: pass
 
-    # 5. Tribal Lore (Dual Spatial Radius + State Match Engine)
+    # Tribal Lore
     try:
         r = supabase.table("tribal_lore").select("*").ilike("region_label", f"%{active_state}%").execute()
         lore_data = r.data or []
@@ -479,7 +425,7 @@ if supabase:
             l_item["evidence_weight"] = float(l_item.get("evidence_weight", 1.5))
     except Exception: pass
 
-    # 6. Community Field Logs
+    # Community Field Logs
     try:
         r = supabase.table("investigator_logs").select("*").execute()
         raw_logs = r.data or []
@@ -510,7 +456,7 @@ if show_bfro and sightings_data:
     for s in sightings_data:
         j_lat, j_lon = apply_jitter(s["latitude"], s["longitude"], offset_seed=1)
         raw_summary = s.get("summary", "No transcript summary provided.")
-        raw_id = str(s.get('report_id', '')).strip()
+        raw_id = str(s.get('report_id', s.get('id', ''))).strip()
         
         link_html = f'<br><a href="https://www.bfro.net/GDB/show_report.asp?id={raw_id}" target="_blank" style="display:inline-block; margin-top:4px; padding:3px 6px; background:#007bff; color:white; border-radius:3px; text-decoration:none; font-size:10px;">📄 Direct BFRO Report #{raw_id}</a>' if raw_id.isdigit() else ''
 
@@ -689,7 +635,7 @@ if show_camps:
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
 # ==========================================
-# DRAWER 1: 📁 SITE-SPECIFIC FIELD FILE (ONE DRAWER • 4 THUMB TABS)
+# DRAWER 1: 📁 SITE-SPECIFIC FIELD FILE
 # ==========================================
 st.markdown("---")
 with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} ({active_state})", expanded=True):
@@ -700,7 +646,6 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
         "🔊 Infrasound"
     ])
 
-    # TAB 1: HOT ZONES & LARSON (RESTORED CLEAN VERTICAL SPACING + STATS)
     with field_tab1:
         st.markdown("### 🌲 Spatial Habitat & Transit Channel Breakdown")
         
@@ -709,7 +654,7 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
         * **What It Is:** Red dotted rings marking areas where reported sightings and human presence intersect viable habitat edges. 
         * **Field Significance:** Sighting pins inside these zones indicate transit or edge encounters rather than primary bedding sites.
         """)
-        st.info("**Calculated Sector Score:** `88.5% Active Contact Probability` | Effort-Adjusted Sighting Density Threshold: $\ge 2.5\times$")
+        st.info("**Calculated Sector Score:** `88.5% Active Contact Probability` | Effort-Adjusted Sighting Density Threshold: $\ge 2.5\\times$")
 
         st.markdown("#### 🪹 2. Orange Predictive Refuges (Core Undisturbed Habitat)")
         st.write("""
@@ -746,7 +691,6 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
         st.latex(r"\text{ESI} = (0.35 \cdot \text{SC}_m) + (0.25 \cdot \text{WaterScore}) + (0.20 \cdot \text{TerrainRoughness}) + (0.20 \cdot \text{UngulateBiomass})")
         st.caption("Environmental Suitability Index ($\text{ESI}$): Evaluates habitat viability independently of human presence ($0.0$ to $1.0$).")
 
-    # TAB 2: LOCAL REGIONAL INTEL
     with field_tab2:
         c_lore, c_media, c_season = st.columns(3)
         with c_lore:
@@ -773,7 +717,6 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
             for season_name, count in seasonal_breakdown.items():
                 st.write(f"**{season_name}:** {count} reports")
 
-    # TAB 3: BIOACOUSTICS
     with field_tab3:
         st.write(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
         st.markdown("""
@@ -785,12 +728,11 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
         xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
         st.markdown(f"* [🔊 **Macaulay Library**]({macaulay_url}) | [🌐 **Xeno-Canto Database**]({xenocanto_url})")
 
-    # TAB 4: INFRASOUND
     with field_tab4:
         st.markdown("### 💡 Field Protocol: Operating the Infrasound Engine")
         st.info("""
-        * **What Is Infrasound?** Acoustic waves oscillating below human hearing ($< 20\text{ Hz}$). Long physical wavelengths allow them to travel $40\text{--}80+$ miles through dense canopy with zero attenuation.
-        * **Recognizing Field Symptoms:** If you experience sudden, unexplainable nausea ($1\text{--}7\text{ Hz}$), cold dread ($7\text{--}12\text{ Hz}$), or peripheral visual smears ($18.9\text{ Hz}$ eyeball vibration), you may be inside an active infrasound wave envelope.
+        * **What Is Infrasound?** Acoustic waves oscillating below human hearing ($< 20\\text{{ Hz}}$). Long physical wavelengths allow them to travel 40--80+ miles through dense canopy with zero attenuation.
+        * **Recognizing Field Symptoms:** If you experience sudden, unexplainable nausea (1--7 Hz), cold dread (7--12 Hz), or peripheral visual smears (18.9 Hz eyeball vibration), you may be inside an active infrasound wave envelope.
         * **Pitch-Shift Simulator:** Use the slider below to shift sub-audible frequencies into human audible ranges to hear what low-frequency standing waves sound like.
         """)
 
@@ -809,7 +751,7 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
         st.markdown("### 🎧 Human Hearing Pitch-Shift Simulator")
         base_hz = st.slider("Select Base Frequency (Hz):", 1.0, 19.0, 8.5, 0.5)
         audible_hz = base_hz * 16
-        st.info(f"Target: `{base_hz} Hz`  ➜  Audible Tone: `{audible_hz:.1f} Hz`")
+        st.info(f"Target: `{base_hz} Hz`   ➜   Audible Tone: `{audible_hz:.1f} Hz`")
         t = np.linspace(0, 2.0, int(22050 * 2.0), False)
         tone = (0.5 * np.sin(2 * np.pi * audible_hz * t) * 32767).astype(np.int16).tobytes()
         buf = io.BytesIO()
@@ -818,7 +760,7 @@ with st.expander(f"📁 Site-Specific Field File — Active Sector: {loc_name} (
         st.audio(buf.getvalue(), format="audio/wav")
 
 # ==========================================
-# DRAWER 2: 📁 CURATED RESEARCH LIBRARY (GLOBAL VAULT)
+# DRAWER 2: 📁 CURATED RESEARCH LIBRARY
 # ==========================================
 with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine", expanded=False):
     st.caption("Nationwide ethnographic archives, historical media scans, and behavioral cross-correlation toolsets.")
@@ -877,8 +819,9 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 
     elif "Sightings" in lib_choice or "BFRO" in lib_choice:
         st.subheader("👣 BFRO Field Sightings Vault")
+        st.write(f"Displaying **{len(sightings_data)}** active sector sightings:")
         for item in sightings_data[:25]:
-            raw_id = str(item.get('report_id', '')).strip()
+            raw_id = str(item.get('report_id', item.get('id', ''))).strip()
             st.markdown(f"#### 👣 {item.get('title')} ({item.get('event_date', 'N/A')})")
             st.info(item.get('summary', 'No summary transcript recorded.'))
             if raw_id.isdigit():
@@ -892,7 +835,7 @@ with st.expander("📐 Mathematical Model Audit, Formulas & Interactive Simulato
     st.markdown("### 💡 How to Use the Math Audit Drawer")
     st.info("""
     * **Purpose:** Provides total scientific transparency. Use this drawer to verify how sighting weights are calculated and how environmental variables dictate map features.
-    * **How to Operate the Simulator:** Move the **Distance to Road** and **Population Density** sliders below. Watch how highway proximity down-weights reports ($0.1\times$), while backcountry reports retain full evidentiary value ($3.0\times$).
+    * **How to Operate the Simulator:** Move the **Distance to Road** and **Population Density** sliders below. Watch how highway proximity down-weights reports ($0.1\\times$), while backcountry reports retain full evidentiary value ($3.0\\times$).
     """)
 
     st.markdown("---")
