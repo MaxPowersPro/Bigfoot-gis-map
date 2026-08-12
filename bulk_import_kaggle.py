@@ -3,7 +3,7 @@ import streamlit as st
 from supabase import create_client
 
 # Direct web source for the geocoded BFRO dataset
-DATA_URL = "https://raw.githubusercontent.com/timothyrenner/bfro_sightings_data/master/data/bfro_reports_geocoded.csv"
+DATA_URL = "https://raw.githubusercontent.com/timothyrenner/bfro_sightings_data/master/data/bfro_reports_geocoded.csv?raw=true"
 
 def run_import():
     st.write("🚀 Starting bulk import from web source...")
