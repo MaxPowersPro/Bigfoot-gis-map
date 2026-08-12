@@ -14,8 +14,7 @@ import io
 import wave
 import urllib.parse
 import streamlit as st
-from data_loader import load_and_standardize_dataset
-
+from data.data_loader import load_and_standardize_dataset
 # Load points automatically from repository bundled assets
 sighting_data = load_and_standardize_dataset("data/bfro_reports.csv")
 
