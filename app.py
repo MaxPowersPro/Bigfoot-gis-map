@@ -1,4 +1,5 @@
-import bulk_import_kagglebulk_import_kaggle.run_import()
+import bulk_import_kaggle
+bulk_import_kaggle.run_import()
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
