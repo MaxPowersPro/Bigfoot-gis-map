@@ -86,7 +86,7 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
         * **🚨 Red Dotted Rings:** Hot Zones where reports, wildlife density, cover, and water overlap.
         * **🪹 Orange Dotted Rings:** Predictive Refuges — core wilderness with zero human sightings, but that scores well as probable habitat.
         * **🌲 Green Channels:** Larson transit corridors connecting nearby Hot Zones along natural terrain gaps.
-        * **🔊 Purple Circles:** Active infrasound propagation envelopes.
+        * **🔊 Purple Marker:** Infrasound source. Bold inner ring = where it can actually be *felt*; light outer ring = where it's still *detectable*. Full source details are in the Local Intel drawer below the map.
         * **🏕️ Green Campgrounds:** Dispersed campsites and backcountry staging points.
         """)
     with col_g3:
@@ -149,6 +149,60 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     a = np.sin(dlat/2)**2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon/2)**2
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     return R * c
+
+# ---- Infrasound source classification (4 real categories, used by Local Intel + Research Library) ----
+INFRASOUND_TYPES = {
+    "waterfall": {
+        "label": "🌊 Waterfall / Hydrological",
+        "cause": "High-volume water impact at waterfalls, rapids, or river spillways.",
+        "freq_range": "3 – 15 Hz",
+        "character": "Continuous rumble.",
+        "felt_miles": 12,
+        "travel_miles": 80,
+        "effect": "Falls mostly in the vestibular resonance band (1-7 Hz) — dizziness, pressure headaches, and loss of balance are the most commonly reported effects within the felt zone."
+    },
+    "wind": {
+        "label": "🌬️ Wind / Mountain Pass",
+        "cause": "High-velocity wind funneling through narrow ridge gaps, saddles, or mountain passes.",
+        "freq_range": "0.5 – 5 Hz",
+        "character": "Continuous, weather- and pressure-system dependent.",
+        "felt_miles": 8,
+        "travel_miles": 55,
+        "effect": "Sits at the low end of the vestibular band — dizziness and disorientation are most likely, especially during active frontal weather passing through the notch."
+    },
+    "manmade": {
+        "label": "⚙️ Man-Made (Dam / Mine)",
+        "cause": "Dam spillway turbulence (continuous hum) or mine/quarry blasting (short, high-amplitude pulses).",
+        "freq_range": "0.5 – 15 Hz",
+        "character": "Dams: steady hum. Mines/quarries: sharp, punctuated blast pulses, documented detectable 10+ miles out.",
+        "felt_miles": 8,
+        "travel_miles": 60,
+        "effect": "Mine blasts can produce a sudden felt pressure jolt rather than a gradual sensation; dam hum tends to produce the same dizziness/dread pattern as natural hydrological sources."
+    },
+    "biological": {
+        "label": "🦍 Biological",
+        "cause": "Large thoracic resonance structures and specialized laryngeal folds in large-bodied animals producing sub-audible vocal bursts.",
+        "freq_range": "8 – 18 Hz",
+        "character": "Vocal burst, not continuous.",
+        "felt_miles": 3,
+        "travel_miles": 8,
+        "effect": "Overlaps the human alpha-wave / 'being watched' band (7-12 Hz) most directly, but the felt zone is small since source amplitude is far below geological or man-made sources."
+    },
+}
+
+def classify_infrasound_type(event_type_str):
+    """Returns one of 'waterfall' / 'wind' / 'manmade' / 'biological', or None if the source
+    doesn't match a known category — we show it as unclassified rather than guessing."""
+    s = str(event_type_str).lower()
+    if any(k in s for k in ["waterfall", "falls", "rapid", "hydro", "niagara", "snoqualmie"]):
+        return "waterfall"
+    if any(k in s for k in ["wind", "pass", "ridge", "saddle", "gap", "aeolian"]):
+        return "wind"
+    if any(k in s for k in ["dam", "mine", "quarry", "blast"]):
+        return "manmade"
+    if any(k in s for k in ["biotic", "biological", "animal", "vocal", "call"]):
+        return "biological"
+    return None
 
 # ---- Black-bear-census-style weighting formulas (kept from the current live app) ----
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
@@ -354,8 +408,13 @@ if supabase:
         for a in (r.data or []):
             a_lat, a_lon = float(a["latitude"]), float(a["longitude"])
             e_type = a.get("event_type", "")
-            prop_radius = 80 if "Niagara" in e_type else (60 if ("Dam" in e_type or "Snoqualmie" in e_type) else 45)
+            itype = classify_infrasound_type(e_type)
+            type_info = INFRASOUND_TYPES.get(itype)
+            prop_radius = type_info["travel_miles"] if type_info else 45
+            felt_radius = type_info["felt_miles"] if type_info else 8
+            a["infrasound_type"] = itype
             a["prop_radius_miles"] = prop_radius
+            a["felt_radius_miles"] = felt_radius
             dist_to_target = haversine_miles(lat, lon, a_lat, a_lon)
             a["dist_to_target"] = dist_to_target
             if dist_to_target <= (radius_miles + prop_radius):
@@ -416,15 +475,20 @@ if show_camps and camps_data:
         c_popup = f"<b>🏕️ {c.get('name', 'Campsite')}</b><br><small>Type: {c.get('type', 'Primitive / Dispersed')}</small>"
         folium.Marker([c["latitude"], c["longitude"]], popup=c_popup, icon=folium.Icon(color="green", icon="campground", prefix="fa")).add_to(m)
 
-# RESTORED: Infrasound / Acoustic Layer (this used to be toggled by the sidebar checkbox but wasn't actually drawn)
+# RESTORED: Infrasound / Acoustic Layer — single purple glance-and-go icon; details live in Local Intel below
 if show_audio and audio_data:
     for a in audio_data:
-        prop_m = a["prop_radius_miles"] * 1609.34
+        type_label = INFRASOUND_TYPES.get(a.get("infrasound_type"), {}).get("label", "❔ Unclassified Source")
+        felt_m = a.get("felt_radius_miles", 8) * 1609.34
+        travel_m = a["prop_radius_miles"] * 1609.34
         off_str = f"<br><b style='color:#d35400;'>⚠️ Trans-Boundary Source: {int(a['dist_to_target'])} miles away ({a['coverage_pct']}% local sector coverage)</b>" if a.get("is_offscreen") else ""
-        a_popup = f"""<b>🔊 INFRASOUND GENERATOR</b><br><b>{a.get('event_type')}</b><br><small>Frequency: {a.get('frequency_hz', 'N/A')}</small><br><small>Physical Propagation: ~{a['prop_radius_miles']} miles</small>{off_str}<br><p style='font-size:10px; margin-top:4px;'>{a.get('notes', '')}</p>"""
+        a_popup = f"""<b>🔊 {type_label}</b><br><b>{a.get('event_type')}</b><br><small>Felt zone: ~{a.get('felt_radius_miles', 8)} mi | Detectable to: ~{a['prop_radius_miles']} mi</small>{off_str}<br><p style='font-size:10px; margin-top:4px;'>See Local Intel drawer below for full details.</p>"""
         if not a.get("is_offscreen"):
             folium.Marker([a["latitude"], a["longitude"]], popup=a_popup, icon=folium.Icon(color="purple", icon="volume-up", prefix="fa")).add_to(m)
-        folium.Circle(radius=prop_m, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1.5, dash_array="4, 6", fill=True, fill_color="#8e44ad", fill_opacity=0.08, popup=f"🔊 Infrasound Physical Footprint ({a['prop_radius_miles']} mi radius)").add_to(m)
+        # Lighter outer ring: full detectable/travel distance
+        folium.Circle(radius=travel_m, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1, dash_array="4, 6", fill=True, fill_color="#8e44ad", fill_opacity=0.04, popup=f"Detectable footprint (~{a['prop_radius_miles']} mi)").add_to(m)
+        # Bold inner ring: where it can actually be felt
+        folium.Circle(radius=felt_m, location=[a["latitude"], a["longitude"]], color="#6c3483", weight=2, fill=True, fill_color="#8e44ad", fill_opacity=0.16, popup=f"Felt zone (~{a.get('felt_radius_miles', 8)} mi)").add_to(m)
 
 # RESTORED: Community Field Logs Layer (also toggled by sidebar but wasn't actually drawn)
 if show_user_logs and user_logs_data:
@@ -557,37 +621,43 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
                 st.code(sample.get("audit_explanation", "No audit trail available for this record."))
 
     with panel_tab2:
-        st.markdown("### 📊 Infrasound Attenuation Physics")
-        st.latex(r"\text{Loss} = 20 \times \log_{10}(R / R_0) + \alpha \times R")
-        st.caption("Sub-audible waves (<20 Hz) experience minimal atmospheric absorption (~0.001 dB/km), letting them propagate 40–80+ miles through forest canopy and terrain that would block audible sound.")
+        st.markdown(f"### 🔊 Infrasound Sources Logged In This Sector")
+        st.caption(f"Site-specific — {loc_name} only. For general infrasound physics covering all source types, see the Research Library below.")
 
-        offscreen_sources = [a for a in audio_data if a.get("is_offscreen")]
-        if offscreen_sources:
-            st.warning("### ⚠️ Active Trans-Boundary Infrasound Envelopes")
-            for off in offscreen_sources:
-                st.markdown(f"* **{off.get('event_type')}:** Origin sits `{int(off['dist_to_target'])} miles` away, but its **{off['prop_radius_miles']}-mile propagation footprint** reaches into this sector.")
+        if not audio_data:
+            st.info("No known infrasound sources currently logged within this sector's radius.")
+        else:
+            for a in audio_data:
+                itype = a.get("infrasound_type")
+                info = INFRASOUND_TYPES.get(itype)
+                st.markdown(f"#### {info['label'] if info else '❔ Unclassified Source'} — {a.get('event_type', 'Unnamed Source')}")
+                if a.get("is_offscreen"):
+                    st.warning(f"⚠️ Origin sits {int(a['dist_to_target'])} miles outside this sector, but its footprint reaches in ({a['coverage_pct']}% local coverage).")
+                if info:
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Frequency", info["freq_range"])
+                    col2.metric("Felt Zone", f"~{a.get('felt_radius_miles', info['felt_miles'])} mi")
+                    col3.metric("Detectable To", f"~{a.get('prop_radius_miles', info['travel_miles'])} mi")
+                    st.write(f"**Cause:** {info['cause']}")
+                    st.write(f"**Character:** {info['character']}")
+                    st.caption(info["effect"])
+                else:
+                    st.caption("This source hasn't been matched to one of the four known categories yet — treat felt/travel distances as unverified until it's re-classified.")
+                if a.get("notes"):
+                    st.caption(f"Field notes: {a.get('notes')}")
+                st.markdown("---")
 
-        st.markdown("---")
-        st.markdown("### 🎧 Human Hearing Pitch-Shift Simulator")
-        st.caption("Infrasound itself is below human hearing — this shifts a chosen frequency up into the audible range so you can hear a representation of it.")
-        base_hz = st.slider("Select Infrasound Base Frequency (Hz):", 1.0, 19.0, 8.5, 0.5)
-        audible_hz = base_hz * 16
-        st.info(f"**Target Infrasound Frequency:** `{base_hz} Hz`  ➜  **Pitch-Shifted Audible Tone:** `{audible_hz:.1f} Hz`")
-        t = np.linspace(0, 2.0, int(22050 * 2.0), False)
-        tone = (0.5 * np.sin(2 * np.pi * audible_hz * t) * 32767).astype(np.int16).tobytes()
-        buf = io.BytesIO()
-        with wave.open(buf, 'wb') as wf:
-            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(tone)
-        st.audio(buf.getvalue(), format="audio/wav")
-
-        st.markdown("---")
-        st.markdown("### 🧠 How It Would Make You Feel")
-        st.write("""
-        * **1.0 – 7.0 Hz:** Inner-ear / vestibular resonance — dizziness, pressure headaches, loss of balance.
-        * **7.0 – 12.0 Hz:** Overlaps human brain alpha waves — hyper-vigilance, unexplained dread, feeling watched.
-        * **18.0 – 19.0 Hz:** Matches the eyeball's resonant frequency — visual smearing, peripheral shadow artifacts.
-        * **50 – 100 Hz harmonics:** Vibrate the chest wall — a felt sense of pressure or breathlessness.
-        """)
+            st.markdown("### 🎧 Field Tone Simulator")
+            st.caption("Infrasound itself is below human hearing — this shifts a chosen frequency up into the audible range so you can hear a representation of it. Set it to a detected source's frequency to get a feel for what it might sound like pitch-shifted.")
+            base_hz = st.slider("Select Base Frequency (Hz):", 0.5, 19.0, 8.5, 0.5, key="local_intel_hz_slider")
+            audible_hz = base_hz * 16
+            st.info(f"**Target Infrasound Frequency:** `{base_hz} Hz`  ➜  **Pitch-Shifted Audible Tone:** `{audible_hz:.1f} Hz`")
+            t = np.linspace(0, 2.0, int(22050 * 2.0), False)
+            tone = (0.5 * np.sin(2 * np.pi * audible_hz * t) * 32767).astype(np.int16).tobytes()
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wf:
+                wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(tone)
+            st.audio(buf.getvalue(), format="audio/wav")
 
     with panel_tab3:
         st.markdown(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
@@ -700,7 +770,35 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 
     elif "Infrasound" in lib_choice:
         st.subheader("🔊 Infrasound Physics & Attenuation Profiles")
-        st.write("Sub-audible sound waves (0.1 to 20 Hz) pass through forest canopy and terrain with near-zero atmospheric absorption (~0.001 dB/km).")
+        st.caption("General reference — covers the phenomenon broadly, not tied to any one search sector. For sources actually logged near you, see the Local Intel drawer above the map.")
+
+        st.markdown("### Attenuation & Propagation")
+        st.latex(r"\text{Loss} = 20 \times \log_{10}(R / R_0) + \alpha \times R")
+        st.write("Sub-audible waves (<20 Hz) experience minimal atmospheric absorption (~0.001 dB/km), letting them propagate 40–80+ miles through forest canopy and terrain that would fully block audible sound.")
+
+        st.markdown("### 📏 Distance Traveled vs. Distance Felt")
+        st.write("""
+        These are not the same number, and the app now distinguishes them:
+        * **Distance traveled** — how far the wave remains physically measurable by an instrument.
+        * **Distance felt** — how far a person would actually notice a physiological effect. This threshold is shorter than the full travel distance, since amplitude decays with distance and the body needs enough of it to register anything.
+        """)
+
+        st.markdown("### 🗂️ The Four Source Categories")
+        for key, info in INFRASOUND_TYPES.items():
+            with st.expander(f"{info['label']} — {info['freq_range']}"):
+                st.write(f"**Cause:** {info['cause']}")
+                st.write(f"**Character:** {info['character']}")
+                st.write(f"**Typical felt zone:** ~{info['felt_miles']} miles | **Typical detectable range:** ~{info['travel_miles']} miles")
+                st.caption(info["effect"])
+
+        st.markdown("### 🧠 Human Physiological & Neurological Effects by Band")
+        st.write("""
+        * **1.0 – 7.0 Hz (Inner Ear / Vestibular Resonance):** Matches the resonant frequency of inner ear fluid — dizziness, pressure headaches, fatigue, loss of balance.
+        * **7.0 – 12.0 Hz (Central Nervous System Resonance):** Overlaps human alpha brain waves (8–12 Hz) — hyper-vigilance, unexplained dread, a sense of being watched.
+        * **18.0 – 19.0 Hz (Ocular Resonance):** Matches the eyeball's own resonant frequency (~18.9 Hz) — visual smearing, peripheral shadow artifacts, blurred depth perception.
+        * **50 – 100 Hz harmonics (Chest Wall Pressure):** Audible upper harmonics accompanying an infrasound burst can vibrate the chest wall — felt pressure or breathlessness.
+        """)
+        st.caption("Effects are dose- and individual-dependent; this table describes documented tendencies by frequency band, not guaranteed outcomes.")
 
     elif "Sightings" in lib_choice or "BFRO" in lib_choice:
         st.subheader("👣 BFRO Field Sightings Vault")
