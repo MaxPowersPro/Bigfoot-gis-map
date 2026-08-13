@@ -799,7 +799,71 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
 with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
     st.caption("Every formula this app uses, why we're using it, and how it was calibrated. Science-based critique on their efficacy is welcome and will be considered.")
 
-    ms_tab1, ms_tab2 = st.tabs(["🧮 What-If Calculator", "⚙️ Model Assumptions"])
+    ms_tab0, ms_tab1, ms_tab2 = st.tabs(["📖 The Formulas", "🧮 What-If Calculator", "⚙️ Model Assumptions"])
+
+    with ms_tab0:
+        st.caption("Every formula this app runs, in plain English — what it is, why we use it, where it's used, and what it can't do yet. Science-based critique on any of this is welcome and will be considered.")
+
+        with st.expander("1️⃣ Observer Effort Factor", expanded=True):
+            st.latex(r"\text{EffortFactor} = \left(\frac{\text{PopDensity}}{50}\right) \times \frac{1}{\text{DistToRoad} + 0.1}")
+            st.write("""
+            **In plain terms:** a single number estimating how *easy* it would be for an ordinary person to be standing in that spot to see and report something. **Population density** = people per square mile nearby. **Distance to road** = miles to the nearest road/trail. Busy + close to a road = a high number. Deep, roadless wilderness = a low number.
+            """)
+            st.write("**Why we use it:** more reports come from easy-to-access places simply because more people pass through them — not because the species is more common there. This is the same correction real wildlife census work (including black bear studies) applies to raw sighting counts.")
+            st.write("**Where it's used:** feeds directly into the Effort-Adjusted Evidence Weight below. Try your own numbers in the What-If Calculator tab.")
+
+        with st.expander("2️⃣ Effort-Adjusted Evidence Weight"):
+            st.latex(rf"W_{{\text{{adjusted}}}} = \frac{{W_{{\text{{base}}}}}}{{1.0 + (k \times \text{{EffortFactor}})}}")
+            st.write("""
+            **In plain terms:** every report starts with a **Base Weight** — a starting score for how strong that report is *before* any correction: `3.0` if there's physical evidence (tracks, hair, a cast), `1.5` for a Class A report (a direct sighting), `0.8` for Class B (a sound or track, no visual), `0.3` for Class C (a secondhand story), plus a `+0.25` bonus if it's corroborated by nearby lore. **k** is how strongly we discount reports from easy-access areas (default `0.5`, adjustable). **EffortFactor** is the number from formula #1 above. The final result is capped between `0.1` and `4.0` so no single report can dominate or vanish entirely.
+            """)
+            st.write("**Why we use it:** pulls the accessibility bias back out — an identical report from deep wilderness ends up counting for more than one from a backyard.")
+            st.write("**Where it's used:** this is the actual weight shown on every sighting popup, and it's what feeds the Hot Zone clustering below.")
+
+        with st.expander("3️⃣ Seasonal Cover Index (SCₘ)"):
+            st.latex(r"SC_m = \text{Prop}_{\text{evergreen}} + (\text{Prop}_{\text{deciduous}} \times \text{LeafStatus}) + \text{Bonus}_{\text{understory}}")
+            st.write("""
+            **In plain terms:** estimates how much visual/thermal concealment a spot's plant cover gives *in a given month*. Evergreen tree cover counts fully year-round. Deciduous (leaf-dropping) tree cover only counts fully when leaves are actually on the trees (roughly May–October); in winter it barely helps. A bonus is added for year-round dense understory like thickets or rhododendron.
+            """)
+            st.write("**Why we use it:** a spot that looks well-covered in a summer photo can be wide open in winter — this keeps the model honest about the season.")
+            st.write("**Where it's used:** feeds into the Environmental Suitability Index below.")
+
+        with st.expander("4️⃣ Environmental Suitability Index (ESI)"):
+            st.latex(r"ESI = 0.35 \cdot SC_m + 0.25 \cdot \text{WaterScore} + 0.20 \cdot \text{TerrainRoughness} + 0.20 \cdot \text{UngulateBiomass}")
+            st.write("""
+            **In plain terms:** a single score from 0 to 1 estimating how good a *habitat* a spot is — combining cover (formula #3), how close it is to water, how rugged/inaccessible the terrain is, and how much prey/food (deer, etc.) is around. Calculated completely independently of whether anyone has ever reported anything there.
+            """)
+            st.write("**Why we use it:** a sighting only tells you where something was *seen*. ESI is the app's attempt to estimate where something *could live*, sightings or not — the core of the whole 'search where he should be, not just where he was' idea.")
+            st.write("**Where it's used:** drives the Predictive Refuge Zone trigger (#6).")
+            st.warning("**Honest limitation:** water proximity, terrain roughness, and prey biomass are currently placeholder constants, not real per-location data — hooking up real terrain/hydrology data is on the data-farming list.")
+
+        with st.expander("5️⃣ Hot Zone Clustering"):
+            st.write("""
+            **In plain terms:** groups nearby weighted reports into a single zone if they fall within a set distance of each other (default 15 miles, adjustable). The circle's size on the map scales with the *combined weight* of everything inside it — not just the raw count.
+            """)
+            st.write("**Why we use it:** a cluster of independently corroborating reports is more convincing than any single one; clustering shows visually where multiple data points agree.")
+            st.write("**Where it's used:** the red dotted rings on the map.")
+
+        with st.expander("6️⃣ Predictive Refuge Trigger"):
+            st.write("""
+            **In plain terms:** scans a grid across the search sector. Flags a spot as a possible refuge if it's far enough from any actual report (default 10 miles) **and** its inferred ESI — estimated from nearby *known* reports' habitat scores — is high enough (default 0.55).
+            """)
+            st.write("**Why we use it:** directly answers the Kentucky case a fellow researcher (Matt Larson) described — a quiet area surrounded by good habitat may be quiet because of human reporting behavior, not because nothing's there.")
+            st.write("**Where it's used:** the orange dotted rings.")
+            st.warning("**Honest limitation:** the ESI used here is inferred/interpolated from nearby reports, not independently measured terrain data yet. Every refuge popup says so.")
+
+        with st.expander("7️⃣ Larson Corridor Connection"):
+            st.write("""
+            **In plain terms:** draws a straight connecting line between two Hot Zones if they're within a set distance of each other (default 20 miles — calibrated against a real, Google-Maps-verified corridor a researcher described in Florida).
+            """)
+            st.write("**Why we use it:** models a plausible travel path between two good habitat areas, framed as connective tissue *within* a home range rather than migration between separate populations.")
+            st.write("**Where it's used:** the green corridor lines.")
+            st.warning("**Honest limitation:** this is a straight-line geometric guess, not a terrain-following path yet — real path-tracing needs land-cover/hydrology data we don't have hooked up.")
+
+        with st.expander("8️⃣ Infrasound Felt/Travel Distances"):
+            st.write("**In plain terms:** for each of 4 known source types (waterfall, wind/mountain pass, man-made dam/mine, biological), a rough distance where the source is still *physically detectable* vs. a tighter distance where a person would actually *feel* an effect.")
+            st.write("**Why we use it — and what it's NOT for:** this is deliberately kept OUT of the positive evidence model. It never adds weight toward 'Bigfoot is here.' Its only job is the opposite — a debunking check, so a researcher can see a natural physiological explanation is plausible before assuming something esoteric.")
+            st.write("**Where it's used:** the purple infrasound rings on the map, and the natural-explanation note on any sighting that falls inside a felt zone.")
 
     with ms_tab1:
         st.markdown("### Effort-Adjusted Evidence Weight — try your own numbers")
