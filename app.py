@@ -11,6 +11,7 @@ import requests
 import numpy as np
 import io
 import wave
+import json
 import urllib.parse
 from data.data_loader import load_and_standardize_dataset
 
@@ -214,7 +215,7 @@ def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: 
     effort_factor = pop_scalar * proximity_friction
     return round(effort_factor, 3)
 
-def calculate_adjusted_evidence_weight(report_class: str, has_physical_evidence: bool, effort_factor: float, lore_boost: bool = False) -> dict:
+def calculate_adjusted_evidence_weight(report_class: str, has_physical_evidence: bool, effort_factor: float, lore_boost: bool = False, k: float = 0.5) -> dict:
     if has_physical_evidence:
         base_weight = 3.0
     elif "Class A" in str(report_class):
@@ -227,7 +228,6 @@ def calculate_adjusted_evidence_weight(report_class: str, has_physical_evidence:
     if lore_boost:
         base_weight += 0.25
 
-    k = 0.5
     adjusted_weight = base_weight / (1.0 + (k * effort_factor))
     final_weight = max(0.1, min(4.0, adjusted_weight))
 
@@ -235,7 +235,7 @@ def calculate_adjusted_evidence_weight(report_class: str, has_physical_evidence:
         "base_weight": base_weight,
         "effort_factor": effort_factor,
         "final_weight": round(final_weight, 2),
-        "audit_explanation": f"Base ({base_weight}x) / (1 + 0.5 * Effort({effort_factor})) = {round(final_weight, 2)}x"
+        "audit_explanation": f"Base ({base_weight}x) / (1 + {k} * Effort({effort_factor})) = {round(final_weight, 2)}x"
     }
 
 def calculate_seasonal_cover_index(event_month: int, prop_evergreen: float, prop_deciduous: float, has_persistent_understory: bool = True) -> float:
@@ -342,6 +342,23 @@ with st.sidebar:
     show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
 
 # ==========================================
+# ADJUSTABLE MODEL ASSUMPTIONS — set defaults once; the Math & Science Drawer below the
+# map lets a user change these live. Streamlit reruns top-to-bottom on every interaction,
+# so reading from session_state here (before these values are used) means a slider defined
+# much further down the page still correctly drives everything computed above it.
+# ==========================================
+PARAM_DEFAULTS = {
+    "param_hotzone_radius_mi": 15.0,   # Hot Zone clustering bandwidth
+    "param_report_gap_mi": 10.0,       # min distance from a direct report to flag a Predictive Refuge
+    "param_esi_threshold": 0.55,       # min ESI proxy score to flag a Predictive Refuge
+    "param_corridor_max_mi": 20.0,     # max distance between Hot Zones to draw a Larson corridor
+    "param_effort_k": 0.5,             # strength of the human-access down-weighting in the effort formula
+}
+for _pk, _pv in PARAM_DEFAULTS.items():
+    if _pk not in st.session_state:
+        st.session_state[_pk] = _pv
+
+# ==========================================
 # 4. UNIFIED DATA PROCESSING & FILTERING
 # ==========================================
 sightings_data, camps_data, audio_data, media_data, lore_data, user_logs_data = [], [], [], [], [], []
@@ -364,7 +381,7 @@ if raw_sightings:
                 eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
                 has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
                 class_rat = s.get("class_rating", "Class A")
-                weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor)
+                weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=st.session_state.param_effort_k)
                 s["effort_factor"] = eff_factor
                 s["evidence_weight"] = weight_dict["final_weight"]
                 s["base_weight"] = weight_dict["base_weight"]
@@ -527,7 +544,7 @@ if show_hotspots and combined_evidence_points:
     weights_arr = np.array([pt["weight"] for pt in combined_evidence_points])
     dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
     visited = set()
-    RADIUS_DEG = 0.22  # ~15 miles
+    RADIUS_DEG = st.session_state.param_hotzone_radius_mi / 69.0
 
     # Red Hot Zones: weighted density hubs (sightings + implicit press/lore boost via evidence_weight)
     for i, pt in enumerate(coords_arr):
@@ -552,9 +569,9 @@ if show_hotspots and combined_evidence_points:
     # so the ESI proxy here is inverse-distance-weighted from nearby *known* reports' esi_score, not a true
     # independent terrain calculation. Popups say so explicitly.
     predictive_refuges = []
-    REPORT_GAP_DEG = 0.15   # ~10 miles with no direct reports nearby
+    REPORT_GAP_DEG = st.session_state.param_report_gap_mi / 69.0
     ESI_PROXY_RADIUS_DEG = 0.6  # ~41 miles — how far we'll look for nearby reports to infer local habitat quality
-    ESI_THRESHOLD = 0.55
+    ESI_THRESHOLD = st.session_state.param_esi_threshold
     MIN_REFUGE_SEPARATION_DEG = 0.15  # ~10 miles apart, so we don't cluster near-duplicate refuge circles
 
     if len(combined_evidence_points) >= 3:
@@ -607,7 +624,7 @@ if show_hotspots and combined_evidence_points:
     # Green Larson Hypothesis corridors: connect nearby hot zones as likely transit channels
     # Capped at 20 miles between hubs (per field-calibrated real-world corridor length), straight-line
     # geometric estimate for now — real terrain-following path-tracing needs land-cover/hydrology data.
-    LARSON_MAX_DEG = 20.0 / 69.0
+    LARSON_MAX_DEG = st.session_state.param_corridor_max_mi / 69.0
     larson_corridor_count = 0
     if len(ground_truth_hubs) > 1:
         connected_pairs = set()
@@ -683,7 +700,8 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
 
         st.markdown("---")
         st.markdown("#### 🧮 Formula Transparency")
-        st.latex(r"W_{\text{adjusted}} = \frac{W_{\text{base}}}{1.0 + (0.5 \times \text{EffortFactor})}")
+        st.latex(rf"W_{{\text{{adjusted}}}} = \frac{{W_{{\text{{base}}}}}}{{1.0 + ({st.session_state.param_effort_k} \times \text{{EffortFactor}})}}")
+        st.caption(f"Current k = {st.session_state.param_effort_k} — adjustable in the Math & Science Drawer below.")
         st.caption("Effort Factor models human observer bias (population density ÷ distance to road) — the same correction wildlife census work applies to raw sighting counts, borrowed from black bear census methodology.")
         if sightings_data:
             with st.expander("See the calculation for a sample report in this sector"):
@@ -773,6 +791,88 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
                     st.write(f"**{season_name}:** {count} reports")
             else:
                 st.info("No dated reports in this sector yet.")
+
+# ==========================================
+# DRAWER: MATH & SCIENCE DRAWER (advanced — collapsed by default, doesn't compete for tab
+# space with the field-use Local Intel tabs on a small screen)
+# ==========================================
+with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
+    st.caption("Every formula this app uses, why we're using it, and how it was calibrated. Science-based critique on their efficacy is welcome and will be considered.")
+
+    ms_tab1, ms_tab2 = st.tabs(["🧮 What-If Calculator", "⚙️ Model Assumptions"])
+
+    with ms_tab1:
+        st.markdown("### Effort-Adjusted Evidence Weight — try your own numbers")
+        st.caption("This does NOT change the live map — it's a sandbox so you can see exactly how the formula behaves before trusting it.")
+        wi_col1, wi_col2 = st.columns(2)
+        with wi_col1:
+            wi_dist_road = st.slider("Distance to nearest road (mi)", 0.05, 20.0, 0.4, 0.05, key="wi_dist_road")
+            wi_pop_density = st.slider("Population density (people/sq mi)", 0.0, 500.0, 45.0, 5.0, key="wi_pop_density")
+            wi_class = st.selectbox("Report class", ["Class A", "Class B", "Class C"], key="wi_class")
+        with wi_col2:
+            wi_physical = st.checkbox("Has physical evidence (tracks/hair/cast)", key="wi_physical")
+            wi_lore = st.checkbox("Corroborated by nearby lore", key="wi_lore")
+            wi_month = st.slider("Month (for Seasonal Cover Index)", 1, 12, 7, key="wi_month")
+
+        wi_effort = calculate_human_effort_factor(wi_dist_road, wi_pop_density)
+        wi_weight = calculate_adjusted_evidence_weight(wi_class, wi_physical, wi_effort, lore_boost=wi_lore, k=st.session_state.param_effort_k)
+        wi_sc = calculate_seasonal_cover_index(wi_month, 0.4, 0.5, True)
+        wi_esi = calculate_environmental_suitability_index(wi_sc, 0.3, 0.6, 0.7)
+
+        wr1, wr2, wr3 = st.columns(3)
+        wr1.metric("Effort Factor", wi_effort)
+        wr2.metric("Adjusted Weight", f"{wi_weight['final_weight']}x")
+        wr3.metric("Seasonal ESI", wi_esi)
+        st.code(wi_weight["audit_explanation"])
+
+    with ms_tab2:
+        st.markdown("### Live Model Assumptions")
+        st.caption("These sliders change what the map actually draws, right now, for this session. Move one, then scroll back up to see the effect.")
+
+        st.session_state.param_hotzone_radius_mi = st.slider(
+            "Hot Zone clustering radius (mi)", 3.0, 40.0, st.session_state.param_hotzone_radius_mi, 1.0,
+            help="How close two reports need to be to count as the same cluster. Default 15 mi — a working guess, not a measured constant."
+        )
+        st.session_state.param_report_gap_mi = st.slider(
+            "Predictive Refuge — min. distance from any report (mi)", 3.0, 30.0, st.session_state.param_report_gap_mi, 1.0,
+            help="How far a spot must sit from the nearest direct report before it can be flagged as a 'quiet pocket.' Default 10 mi."
+        )
+        st.session_state.param_esi_threshold = st.slider(
+            "Predictive Refuge — min. ESI proxy score", 0.30, 0.90, st.session_state.param_esi_threshold, 0.05,
+            help="How strong the inferred habitat quality has to be before flagging a refuge. Default 0.55."
+        )
+        st.session_state.param_corridor_max_mi = st.slider(
+            "Larson corridor — max distance between Hot Zones (mi)", 5.0, 60.0, st.session_state.param_corridor_max_mi, 5.0,
+            help="Calibrated against Matt Larson's real ~20-mile Florida corridor. Not a proven upper bound for the species."
+        )
+        st.session_state.param_effort_k = st.slider(
+            "Effort-weighting strength (k)", 0.0, 2.0, st.session_state.param_effort_k, 0.1,
+            help="How aggressively high-access reports get down-weighted. Default 0.5."
+        )
+
+        st.markdown("---")
+        col_reset, col_export, col_import = st.columns(3)
+        with col_reset:
+            if st.button("↩️ Reset to Defaults", use_container_width=True):
+                for _pk, _pv in PARAM_DEFAULTS.items():
+                    st.session_state[_pk] = _pv
+                st.rerun()
+        with col_export:
+            settings_json = json.dumps({k: st.session_state[k] for k in PARAM_DEFAULTS}, indent=2)
+            st.download_button("💾 Download My Settings", data=settings_json, file_name="maxquest_model_settings.json", mime="application/json", use_container_width=True)
+        with col_import:
+            uploaded_settings = st.file_uploader("📤 Load Settings", type="json", key="settings_uploader", label_visibility="collapsed")
+            if uploaded_settings is not None:
+                try:
+                    loaded = json.load(uploaded_settings)
+                    for pk in PARAM_DEFAULTS:
+                        if pk in loaded:
+                            st.session_state[pk] = float(loaded[pk])
+                    st.success("Settings loaded — scroll up to see the updated map.")
+                except Exception as e:
+                    st.error(f"Couldn't read that file: {e}")
+
+        st.caption("Saving or sharing a search area (not just these model settings) is on the list for later — not part of this drawer yet.")
 
 # ==========================================
 # DRAWER: RESTORED CURATED RESEARCH LIBRARY (nationwide reference vault)
