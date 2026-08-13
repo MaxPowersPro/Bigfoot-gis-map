@@ -26,7 +26,50 @@ st.set_page_config(
 )
 
 # Load master bundled datasets from /data directory
-raw_sightings = load_and_standardize_dataset("data/bfro_reports.csv")
+raw_sightings_bfro = load_and_standardize_dataset("data/bfro_reports.csv")
+for _s in raw_sightings_bfro:
+    _s["source"] = "BFRO"
+
+def load_john_green_data(path="data/john_green_incidents_clean.csv"):
+    """Loads John Green's historical sasquatch database (public domain), building
+    sighting records from its real columns rather than forcing it through the
+    BFRO-tuned generic loader. Every record is tagged source='John Green Historical
+    Archive' so it never gets silently blended with/mistaken for BFRO data."""
+    import pandas as pd
+    import os
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return []
+
+    records = []
+    for _, row in df.iterrows():
+        town = str(row.get("i_nearest_town", "")) if pd.notna(row.get("i_nearest_town")) else ""
+        state = str(row.get("i_state_prov", "")) if pd.notna(row.get("i_state_prov")) else ""
+        title = f"Historical Account near {town}, {state}" if town else f"Historical Account, {state}"
+        has_tracks = pd.notna(row.get("i_tracks")) or pd.notna(row.get("i_cast_made"))
+        citation = str(row.get("i_name", "")) if pd.notna(row.get("i_name")) else "John Green Historical Archive"
+
+        records.append({
+            "id": f"JG-{row.get('i_incident_id', '')}",
+            "report_id": f"JG-{row.get('i_incident_id', '')}",
+            "title": title,
+            "summary": citation,
+            "latitude": row.get("latitude"),
+            "longitude": row.get("longitude"),
+            "event_date": str(row.get("i_observation_date", "N/A")),
+            "class_rating": "Historical Account",
+            "has_physical_evidence": bool(has_tracks),
+            "county": str(row.get("i_county", "")) if pd.notna(row.get("i_county")) else "",
+            "state": state,
+            "source": "John Green Historical Archive",
+        })
+    return records
+
+raw_sightings_john_green = load_john_green_data()
+raw_sightings = raw_sightings_bfro + raw_sightings_john_green
 raw_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
 raw_news = load_and_standardize_dataset("data/press_archives.csv")
 raw_camps = load_and_standardize_dataset("data/campsites.csv")  # optional - app runs fine if this file doesn't exist yet
@@ -83,7 +126,8 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
     with col_g2:
         st.markdown("#### 🗺️ Master Map Key")
         st.write("""
-        * **👣 Dual Footprints:** Sighting reports. Click to view Class, Evidence Weight, and Physical Summaries.
+        * **👣 Dual Footprints:** BFRO sighting reports. Click to view Class, Evidence Weight, and Physical Summaries.
+        * **📜 Scroll Icon:** Historical accounts from John Green's public-domain archive (pre-BFRO era).
         * **🚨 Red Dotted Rings:** Hot Zones where reports, wildlife density, cover, and water overlap.
         * **🪹 Orange Dotted Rings:** Predictive Refuges — high inferred habitat quality with no direct sightings nearby (could mean it's genuinely quiet, or that reports aren't reaching outside databases).
         * **🌲 Green Channels:** Larson transit corridors (≤20 miles) connecting nearby Hot Zones along natural terrain gaps.
@@ -218,7 +262,7 @@ def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: 
 def calculate_adjusted_evidence_weight(report_class: str, has_physical_evidence: bool, effort_factor: float, lore_boost: bool = False, k: float = 0.5) -> dict:
     if has_physical_evidence:
         base_weight = 3.0
-    elif "Class A" in str(report_class):
+    elif "Class A" in str(report_class) or "Historical Account" in str(report_class):
         base_weight = 1.5
     elif "Class B" in str(report_class):
         base_weight = 0.8
@@ -487,6 +531,7 @@ if show_bfro and sightings_data:
         j_lat, j_lon = apply_jitter(s["latitude"], s["longitude"], offset_seed=1)
         raw_summary = s.get("summary", "No transcript summary provided.")
         raw_id = str(s.get('report_id', s.get('id', ''))).strip()
+        source_label = s.get("source", "BFRO")
         link_html = f'<br><a href="https://www.bfro.net/GDB/show_report.asp?id={raw_id}" target="_blank" style="display:inline-block; margin-top:4px; padding:3px 6px; background:#007bff; color:white; border-radius:3px; text-decoration:none; font-size:10px;">📄 Direct BFRO Report #{raw_id}</a>' if raw_id.isdigit() else ''
         infrasound_note = ""
         if s.get("nearby_infrasound"):
@@ -494,15 +539,16 @@ if show_bfro and sightings_data:
             infrasound_note = f"""<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">🔊 <b>Natural explanation check:</b> within the felt zone of {ni['label']} ({ni['dist_miles']:.1f} mi) — see Local Intel.</div>"""
         popup_html = f"""
         <div style="font-family:sans-serif; width:260px;">
-        <b style="color:#2b78e4;">👣 {s.get('title', 'Sighting Report')}</b><br>
-        <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Weight:</b> {s.get('evidence_weight', 1.0)}x</small><br>
+        <b style="color:#2b78e4;">{'📜' if source_label != 'BFRO' else '👣'} {s.get('title', 'Sighting Report')}</b><br>
+        <small><b>Source:</b> {source_label} | <b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Weight:</b> {s.get('evidence_weight', 1.0)}x</small><br>
         <hr style="margin:4px 0;">
         <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px;">{raw_summary[:160]}...</p>
         {infrasound_note}
         {link_html}
         </div>
         """
-        folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=280), icon=folium.DivIcon(html="""<div style="font-size:16px;">👣</div>""", icon_size=(20, 20), icon_anchor=(10, 10))).add_to(m)
+        marker_icon = "📜" if source_label != "BFRO" else "👣"
+        folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=280), icon=folium.DivIcon(html=f"""<div style="font-size:16px;">{marker_icon}</div>""", icon_size=(20, 20), icon_anchor=(10, 10))).add_to(m)
 
 # Campsites Layer
 if show_camps and camps_data:
