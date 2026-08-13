@@ -84,8 +84,8 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
         st.write("""
         * **👣 Dual Footprints:** Sighting reports. Click to view Class, Evidence Weight, and Physical Summaries.
         * **🚨 Red Dotted Rings:** Hot Zones where reports, wildlife density, cover, and water overlap.
-        * **🪹 Orange Dotted Rings:** Predictive Refuges — core wilderness with zero human sightings, but that scores well as probable habitat.
-        * **🌲 Green Channels:** Larson transit corridors connecting nearby Hot Zones along natural terrain gaps.
+        * **🪹 Orange Dotted Rings:** Predictive Refuges — high inferred habitat quality with no direct sightings nearby (could mean it's genuinely quiet, or that reports aren't reaching outside databases).
+        * **🌲 Green Channels:** Larson transit corridors (≤20 miles) connecting nearby Hot Zones along natural terrain gaps.
         * **🔊 Purple Marker:** Infrasound source. Bold inner ring = where it can actually be *felt*; light outer ring = where it's still *detectable*. Full source details are in the Local Intel drawer below the map.
         * **🏕️ Green Campgrounds:** Dispersed campsites and backcountry staging points.
         """)
@@ -433,6 +433,19 @@ if supabase:
     except Exception:
         pass
 
+# Debunking cross-reference: flag sightings that fall within a known infrasound source's felt zone.
+# This is informational only — it never touches evidence_weight or the ESI math. It exists so a
+# researcher can see "a natural physiological explanation is plausible here" before leaning esoteric,
+# the same role the fauna misidentification tab plays for sounds/sightings.
+for s in sightings_data:
+    s["nearby_infrasound"] = None
+    for a in audio_data:
+        dist = haversine_miles(float(s["latitude"]), float(s["longitude"]), float(a["latitude"]), float(a["longitude"]))
+        if dist <= a.get("felt_radius_miles", 8):
+            itype_label = INFRASOUND_TYPES.get(a.get("infrasound_type"), {}).get("label", "an unclassified infrasound source")
+            s["nearby_infrasound"] = {"label": itype_label, "event_type": a.get("event_type", ""), "dist_miles": dist}
+            break
+
 # ==========================================
 # 5. MAP BANNER & FOLIUM MAP RENDERER
 # ==========================================
@@ -458,12 +471,17 @@ if show_bfro and sightings_data:
         raw_summary = s.get("summary", "No transcript summary provided.")
         raw_id = str(s.get('report_id', s.get('id', ''))).strip()
         link_html = f'<br><a href="https://www.bfro.net/GDB/show_report.asp?id={raw_id}" target="_blank" style="display:inline-block; margin-top:4px; padding:3px 6px; background:#007bff; color:white; border-radius:3px; text-decoration:none; font-size:10px;">📄 Direct BFRO Report #{raw_id}</a>' if raw_id.isdigit() else ''
+        infrasound_note = ""
+        if s.get("nearby_infrasound"):
+            ni = s["nearby_infrasound"]
+            infrasound_note = f"""<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">🔊 <b>Natural explanation check:</b> within the felt zone of {ni['label']} ({ni['dist_miles']:.1f} mi) — see Local Intel.</div>"""
         popup_html = f"""
         <div style="font-family:sans-serif; width:260px;">
         <b style="color:#2b78e4;">👣 {s.get('title', 'Sighting Report')}</b><br>
         <small><b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Weight:</b> {s.get('evidence_weight', 1.0)}x</small><br>
         <hr style="margin:4px 0;">
         <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px;">{raw_summary[:160]}...</p>
+        {infrasound_note}
         {link_html}
         </div>
         """
@@ -527,18 +545,69 @@ if show_hotspots and combined_evidence_points:
     for hub in ground_truth_hubs:
         folium.Circle(radius=8000 + (hub['weight'] * 1500), location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
 
-    # Orange Predictive Refuges: pockets with no direct sightings, but ringed by nearby hot zones (i.e. not urban, not directly reported)
-    if len(ground_truth_hubs) >= 2:
-        hub_coords = np.array([[h["lat"], h["lon"]] for h in ground_truth_hubs])
-        mean_lat, mean_lon = float(np.mean(hub_coords[:, 0])), float(np.mean(hub_coords[:, 1]))
-        dist_to_nearest_sighting = float(np.min(np.sqrt((coords_arr[:, 0] - mean_lat) ** 2 + (coords_arr[:, 1] - mean_lon) ** 2)))
-        if dist_to_nearest_sighting > 0.12 and not filter_urban(mean_lat, mean_lon):
-            predictive_refuges.append({"lat": mean_lat, "lon": mean_lon, "surrounding_weight": float(np.sum(weights_arr))})
+    # Orange Predictive Refuges: grid-scanned for pockets with high inferred habitat suitability
+    # (ESI proxy from nearby reports) but near-zero direct sightings — matches Matt Larson's KY case,
+    # where the true habitat may be the *quiet* pocket surrounded by report activity, not just "far from everything."
+    # HONEST LIMITATION: we don't yet have real per-point terrain/hydrology data (that's a data-farming task),
+    # so the ESI proxy here is inverse-distance-weighted from nearby *known* reports' esi_score, not a true
+    # independent terrain calculation. Popups say so explicitly.
+    predictive_refuges = []
+    REPORT_GAP_DEG = 0.15   # ~10 miles with no direct reports nearby
+    ESI_PROXY_RADIUS_DEG = 0.6  # ~41 miles — how far we'll look for nearby reports to infer local habitat quality
+    ESI_THRESHOLD = 0.55
+    MIN_REFUGE_SEPARATION_DEG = 0.15  # ~10 miles apart, so we don't cluster near-duplicate refuge circles
+
+    if len(combined_evidence_points) >= 3:
+        esi_arr = np.array([pt["esi"] for pt in combined_evidence_points])
+        min_lat_g, max_lat_g = coords_arr[:, 0].min(), coords_arr[:, 0].max()
+        min_lon_g, max_lon_g = coords_arr[:, 1].min(), coords_arr[:, 1].max()
+        buffer_deg = 0.15
+        grid_n = 16
+        lat_grid = np.linspace(min_lat_g - buffer_deg, max_lat_g + buffer_deg, grid_n)
+        lon_grid = np.linspace(min_lon_g - buffer_deg, max_lon_g + buffer_deg, grid_n)
+
+        candidates = []
+        for g_lat in lat_grid:
+            for g_lon in lon_grid:
+                if filter_urban(g_lat, g_lon):
+                    continue
+                dists_deg = np.sqrt((coords_arr[:, 0] - g_lat) ** 2 + (coords_arr[:, 1] - g_lon) ** 2)
+                nearest_report_deg = float(np.min(dists_deg))
+                if nearest_report_deg < REPORT_GAP_DEG:
+                    continue  # too close to an actual report — not a "quiet pocket"
+
+                in_radius = dists_deg <= ESI_PROXY_RADIUS_DEG
+                if not np.any(in_radius):
+                    continue  # no nearby data to infer habitat quality from at all
+
+                idw_weights = 1.0 / (dists_deg[in_radius] + 0.02) ** 2
+                esi_proxy = float(np.sum(idw_weights * esi_arr[in_radius]) / np.sum(idw_weights))
+                if esi_proxy >= ESI_THRESHOLD:
+                    candidates.append({"lat": g_lat, "lon": g_lon, "esi_proxy": esi_proxy, "gap_miles": nearest_report_deg * 69.0})
+
+        # Keep only the strongest, well-separated candidates (avoid a wall of overlapping circles)
+        candidates.sort(key=lambda c: c["esi_proxy"], reverse=True)
+        for cand in candidates:
+            too_close = any(
+                np.sqrt((cand["lat"] - kept["lat"]) ** 2 + (cand["lon"] - kept["lon"]) ** 2) < MIN_REFUGE_SEPARATION_DEG
+                for kept in predictive_refuges
+            )
+            if not too_close:
+                predictive_refuges.append(cand)
+            if len(predictive_refuges) >= 5:
+                break
 
     for ref in predictive_refuges:
-        folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup="🪹 Predictive Refuge Zone — probable habitat, zero direct sightings").add_to(m)
+        ref_popup = (f"🪹 Predictive Refuge Zone<br>"
+                     f"<b>ESI proxy:</b> {ref['esi_proxy']:.2f} (from nearby reports — not yet real terrain data)<br>"
+                     f"<b>Nearest report:</b> {ref['gap_miles']:.1f} mi away<br>"
+                     f"<small>High inferred habitat quality, no direct reports here — could mean it's genuinely quiet, or that reports simply aren't reaching outside databases (see the Larson/Kentucky case).</small>")
+        folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup=ref_popup).add_to(m)
 
     # Green Larson Hypothesis corridors: connect nearby hot zones as likely transit channels
+    # Capped at 20 miles between hubs (per field-calibrated real-world corridor length), straight-line
+    # geometric estimate for now — real terrain-following path-tracing needs land-cover/hydrology data.
+    LARSON_MAX_DEG = 20.0 / 69.0
     larson_corridor_count = 0
     if len(ground_truth_hubs) > 1:
         connected_pairs = set()
@@ -546,7 +615,7 @@ if show_hotspots and combined_evidence_points:
             h1 = ground_truth_hubs[i]
             dists = [(np.sqrt((h1["lat"] - ground_truth_hubs[j]["lat"]) ** 2 + (h1["lon"] - ground_truth_hubs[j]["lon"]) ** 2), j) for j in range(len(ground_truth_hubs)) if i != j]
             dists.sort()
-            if dists and dists[0][0] < 0.45:
+            if dists and dists[0][0] < LARSON_MAX_DEG:
                 j_near = dists[0][1]
                 pair_key = tuple(sorted([i, j_near]))
                 if pair_key not in connected_pairs:
@@ -599,15 +668,16 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
             st.markdown("### 🪹 Predictive Refuge Zones")
             st.caption("Probable habitat with *no* direct sightings.")
             st.write("""
-            * A sighting marks where something was *seen*, not necessarily where it *lives* — refuges correct for that.
-            * Calculated as the weighted center of nearby Hot Zones, kept only if it sits meaningfully far from any actual report and isn't in an urban zone.
-            * Represents unsurveyed core wilderness a Hot-Zone-only model would miss entirely.
+            * A sighting marks where something was *seen*, not necessarily where it *lives* — a report gap can also mean a close-knit community that simply doesn't report to outsiders, not that nothing is there.
+            * Scans a grid across the sector; flags a pocket if it's >10 miles from any direct report **and** scores high on an ESI proxy inferred from nearby reports' habitat data.
+            * **Honest limitation:** the ESI proxy is inferred from nearby known reports, not independent terrain/hydrology data yet — that upgrade is on the data-farming list.
             """)
         with col_lh:
             st.markdown("### 🌲 The Larson Hypothesis")
-            st.caption("Likely travel routes, not habitat itself.")
+            st.caption("Path-of-least-resistance transit, capped at 20 miles.")
             st.write("""
-            * Connects nearby Hot Zones with a corridor, modeling the path of least resistance an animal would take between two core areas.
+            * Connects Hot Zones within 20 miles of each other — calibrated against a real field-observed corridor length, not an arbitrary number.
+            * Currently a straight-line geometric estimate. Real terrain-following path tracing (rivers, ridgelines, forest cover) needs land-cover/hydrology data we don't have hooked up yet.
             * Kept distinct from the red zones on purpose — a corridor is a *route*, not a *habitat*.
             """)
 
@@ -748,7 +818,7 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 
     elif "Primate" in lib_choice or "Biology" in lib_choice:
         st.subheader("🐒 Comparative Primate & Hominid Biology Vault")
-        p_tab1, p_tab2, p_tab3 = st.tabs(["📐 Footprint & Gait Mechanics", "🔊 Vocalization & Vocal Tracts", "🦴 Sagittal Crest & Skull Anatomy"])
+        p_tab1, p_tab2, p_tab3, p_tab4 = st.tabs(["📐 Footprint & Gait Mechanics", "🔊 Vocalization & Vocal Tracts", "🦴 Sagittal Crest & Skull Anatomy", "🗺️ Home Range & Movement Ecology"])
         with p_tab1:
             st.markdown("#### Foot Structure: Human vs. Gorilla vs. Sasquatch Casts")
             st.write("""
@@ -767,6 +837,20 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
             * **Sagittal Crest:** Bone ridge along the skull top, prominent in male gorillas, for temporalis jaw muscle attachment.
             * **Conical Skull Descriptions:** Field accounts describe a peaked head shape, consistent with a strong sagittal crest.
             """)
+        with p_tab4:
+            st.markdown("#### How Much Space Would a Large-Bodied Primate Actually Need?")
+            st.write("A key finding shapes how this app models zones and corridors: **none of the great apes truly migrate.** All three keep a stable home range reused for years, not a seasonal migratory route like caribou or songbirds.")
+            st.table({
+                "Species": ["Gorilla", "Chimpanzee", "Orangutan (male / female)", "Black bear (male / female)"],
+                "Typical home range": ["~9-16 sq mi", "~7-40 sq mi (up to ~77 in savanna)", "up to ~15 sq mi / ~0.2-3.5 sq mi", "~10-100+ sq mi / ~2.5-25 sq mi"],
+                "Movement pattern": ["Stationary core, <1 mi/day", "Stable, aggressively defended", "Non-territorial, overlapping, males roam within a fixed area", "Stable range with real seasonal shifts chasing food"],
+            })
+            st.write("""
+            * **Working model implication:** given a hypothesized body size larger than a gorilla and likely higher caloric needs (especially in temperate climates with real winters), a home range on the larger end of the black bear scale — or larger — is the most defensible working assumption.
+            * **What this means for corridors:** a Larson Hypothesis corridor most plausibly represents the connective tissue *within* one individual or family group's home range (like a bear's seasonal shift between a spring and fall feeding patch) — not a migration route between two unrelated populations.
+            * **Open question, not yet built into the app:** whether a Hot Zone + a connected Refuge + the corridor between them adds up to a plausible single home-range size is a useful sanity check, but the app does not currently calculate or flag this.
+            """)
+            st.caption("Sources: New England Primate Conservancy, Britannica, National Geographic, Smithsonian National Zoo, PBS Nature, SeaWorld/Busch Gardens, Better Planet Education, Bear Hunting Magazine (PA home range study), BearWise, Florida FWC, Virginia DWR.")
 
     elif "Infrasound" in lib_choice:
         st.subheader("🔊 Infrasound Physics & Attenuation Profiles")
@@ -795,9 +879,10 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
         st.write("""
         * **1.0 – 7.0 Hz (Inner Ear / Vestibular Resonance):** Matches the resonant frequency of inner ear fluid — dizziness, pressure headaches, fatigue, loss of balance.
         * **7.0 – 12.0 Hz (Central Nervous System Resonance):** Overlaps human alpha brain waves (8–12 Hz) — hyper-vigilance, unexplained dread, a sense of being watched.
-        * **18.0 – 19.0 Hz (Ocular Resonance):** Matches the eyeball's own resonant frequency (~18.9 Hz) — visual smearing, peripheral shadow artifacts, blurred depth perception.
+        * **18.0 – 19.0 Hz (Ocular Resonance) — the "Ghost Frequency":** Matches the eyeball's own resonant frequency (~18.9 Hz) — visual smearing, peripheral shadow artifacts, blurred depth perception. Documented by engineer Vic Tandy in 1998, after he traced his own "ghost" sighting at a Coventry lab to a fan emitting 18.98 Hz; when the fan was switched off, the sighting and the accompanying dread stopped. Published as "The Ghost in the Machine," *Journal of the Society for Psychical Research*.
         * **50 – 100 Hz harmonics (Chest Wall Pressure):** Audible upper harmonics accompanying an infrasound burst can vibrate the chest wall — felt pressure or breathlessness.
         """)
+        st.caption("The 18-19 Hz band is the single most important one for this app's purpose: it's a documented, testable natural cause for exactly the 'shadow figure' and 'dread' reports that push researchers toward esoteric explanations.")
         st.caption("Effects are dose- and individual-dependent; this table describes documented tendencies by frequency band, not guaranteed outcomes.")
 
     elif "Sightings" in lib_choice or "BFRO" in lib_choice:
