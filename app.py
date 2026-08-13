@@ -26,9 +26,39 @@ st.set_page_config(
 )
 
 # Load master bundled datasets from /data directory
-raw_sightings_bfro = load_and_standardize_dataset("data/bfro_reports.csv")
-for _s in raw_sightings_bfro:
-    _s["source"] = "BFRO"
+def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
+    """Loads the official BFRO KMZ-derived dataset (replaces the old corrupted
+    bfro_reports.csv entirely). Built as its own dedicated loader rather than
+    reusing the generic BFRO-tuned loader, since that loader assumes a 'number'
+    column for report IDs (this file has 'report_id') and only exposes a few
+    fields at the top level -- reusing it would have silently broken the direct
+    BFRO report links."""
+    import pandas as pd
+    import os
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return []
+
+    records = []
+    for _, row in df.iterrows():
+        records.append({
+            "id": str(row.get("report_id", "")),
+            "report_id": str(row.get("report_id", "")),
+            "title": str(row.get("title", "BFRO Report")) if pd.notna(row.get("title")) else "BFRO Report",
+            "summary": str(row.get("summary", "")) if pd.notna(row.get("summary")) else "",
+            "latitude": row.get("latitude"),
+            "longitude": row.get("longitude"),
+            "event_date": str(row.get("event_date", "N/A")) if pd.notna(row.get("event_date")) else "N/A",
+            "class_rating": str(row.get("class_rating", "Unclassified")) if pd.notna(row.get("class_rating")) else "Unclassified",
+            "county": str(row.get("county", "")) if pd.notna(row.get("county")) else "",
+            "source": "BFRO",
+        })
+    return records
+
+raw_sightings_bfro = load_bfro_clean_data()
 
 def load_john_green_data(path="data/john_green_incidents_clean.csv"):
     """Loads John Green's historical sasquatch database (public domain), building
@@ -991,7 +1021,7 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
     st.caption("Nationwide ethnographic archives, historical media scans, comparative primate biology, and behavioral search toolsets.")
     lib_choice = st.radio(
         "Select Vault Section:",
-        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🐒 Comparative Primate Biology & Morphology", "🔊 Infrasound Physics", "👣 BFRO Field Reports"],
+        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🐒 Comparative Primate Biology & Morphology", "🔊 Infrasound Physics", "👣📜 Sightings & Historical Accounts"],
         horizontal=True
     )
     st.markdown("---")
@@ -1096,11 +1126,18 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
         st.caption("Effects are dose- and individual-dependent; this table describes documented tendencies by frequency band, not guaranteed outcomes.")
 
     elif "Sightings" in lib_choice or "BFRO" in lib_choice:
-        st.subheader("👣 BFRO Field Sightings Vault")
-        st.write(f"Displaying **{len(sightings_data)}** active sector sightings:")
-        for item in sightings_data[:25]:
+        st.subheader("👣📜 Sightings & Historical Accounts Vault")
+        available_sources = sorted(set(item.get("source", "BFRO") for item in sightings_data))
+        source_filter = st.radio("Filter by source:", ["All"] + available_sources, horizontal=True, key="sightings_source_filter")
+        filtered_sightings = sightings_data if source_filter == "All" else [item for item in sightings_data if item.get("source", "BFRO") == source_filter]
+
+        st.write(f"Displaying **{len(filtered_sightings)}** active sector records:")
+        for item in filtered_sightings[:25]:
             raw_id = str(item.get('report_id', item.get('id', ''))).strip()
-            st.markdown(f"#### 👣 {item.get('title')} ({item.get('event_date', 'N/A')})")
+            item_source = item.get("source", "BFRO")
+            icon = "👣" if item_source == "BFRO" else "📜"
+            st.markdown(f"#### {icon} {item.get('title')} ({item.get('event_date', 'N/A')})")
+            st.caption(f"Source: {item_source}")
             st.info(item.get('summary', 'No summary transcript recorded.'))
             if raw_id.isdigit():
                 st.markdown(f"[📄 View Full BFRO Report #{raw_id}](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
