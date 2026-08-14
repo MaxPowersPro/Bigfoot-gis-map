@@ -81,12 +81,15 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
         title = f"Historical Account near {town}, {state}" if town else f"Historical Account, {state}"
         has_tracks = pd.notna(row.get("i_tracks")) or pd.notna(row.get("i_cast_made"))
         citation = str(row.get("i_name", "")) if pd.notna(row.get("i_name")) else "John Green Historical Archive"
+        narrative = str(row.get("i_account_of_incident", "")) if pd.notna(row.get("i_account_of_incident")) else ""
+        summary_text = narrative if narrative else f"(No narrative on file — citation: {citation})"
 
         records.append({
             "id": f"JG-{row.get('i_incident_id', '')}",
             "report_id": f"JG-{row.get('i_incident_id', '')}",
             "title": title,
-            "summary": citation,
+            "summary": summary_text,
+            "citation": citation,
             "latitude": row.get("latitude"),
             "longitude": row.get("longitude"),
             "event_date": str(row.get("i_observation_date", "N/A")),
