@@ -159,8 +159,7 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
     with col_g2:
         st.markdown("#### 🗺️ Master Map Key")
         st.write("""
-        * **👣 Dual Footprints:** BFRO sighting reports. Click to view Class, Evidence Weight, and Physical Summaries.
-        * **📜 Scroll Icon:** Historical accounts from John Green's public-domain archive (pre-BFRO era).
+        * **👣📜 Footprint Markers:** Blue = standard biological sighting. Purple = report text includes documented high-strangeness language (UFO, mystery lights, mind-speak, etc.) — a content flag, not a claim that anything paranormal occurred. Footprint vs. scroll icon shows BFRO vs. John Green historical source.
         * **🚨 Red Dotted Rings:** Hot Zones where reports, wildlife density, cover, and water overlap.
         * **🪹 Orange Dotted Rings:** Predictive Refuges — high inferred habitat quality with no direct sightings nearby (could mean it's genuinely quiet, or that reports aren't reaching outside databases).
         * **🌲 Green Channels:** Larson transit corridors (≤20 miles) connecting nearby Hot Zones along natural terrain gaps.
@@ -303,6 +302,27 @@ def scan_evidence_patterns(sightings):
             if any(kw in text for kw in keywords):
                 results[category].append({"report": s, "season": season})
     return results
+
+# ---- Paranormal/high-strangeness content indicator ----
+# Deliberately content-based, not source-based: an earlier version of this app used
+# Class C (secondhand sourcing) as a stand-in for "anomalous," which conflates two
+# different things -- how reliably a report was sourced isn't the same as whether its
+# content includes high-strangeness elements. A rock-solid Class A report can include
+# a UFO; a Class C report can be perfectly mundane. This scans the actual text instead.
+# Categories drawn from "Where the Footprints End" (Cutchin & Renner) -- documented
+# recurring high-strangeness elements in Bigfoot literature.
+PARANORMAL_KEYWORDS = [
+    "ufo", "mystery light", "orb", "telepath", "mind-speak", "mindspeak", "mind speak",
+    "vanished", "disappeared without", "teleport", "portal", "shapeshift", "shape-shift",
+    "glowing eyes", "no tracks after", "tracks stopped", "psychic",
+]
+
+def scan_paranormal_content(text: str) -> bool:
+    """Returns True if the report's own text mentions a documented high-strangeness
+    category -- a content-based flag, never a claim that anything paranormal actually
+    happened. Purely descriptive of what the report says."""
+    low = text.lower()
+    return any(kw in low for kw in PARANORMAL_KEYWORDS)
 
 # ---- Black-bear-census-style weighting formulas (kept from the current live app) ----
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
@@ -561,6 +581,7 @@ for s in sightings_data:
             itype_label = INFRASOUND_TYPES.get(a.get("infrasound_type"), {}).get("label", "an unclassified infrasound source")
             s["nearby_infrasound"] = {"label": itype_label, "event_type": a.get("event_type", ""), "dist_miles": dist}
             break
+    s["is_anomalous"] = scan_paranormal_content(f"{s.get('title', '')} {s.get('summary', '')}")
 
 # ==========================================
 # 5. MAP BANNER & FOLIUM MAP RENDERER
@@ -592,18 +613,32 @@ if show_bfro and sightings_data:
         if s.get("nearby_infrasound"):
             ni = s["nearby_infrasound"]
             infrasound_note = f"""<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">🔊 <b>Natural explanation check:</b> within the felt zone of {ni['label']} ({ni['dist_miles']:.1f} mi) — see Local Intel.</div>"""
+
+        is_anomalous = s.get("is_anomalous", False)
+        pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
+        source_icon = "📜" if source_label != "BFRO" else "👣"
+
+        anomalous_note = ""
+        if is_anomalous:
+            anomalous_note = """<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">👻 <b>Content flag (conjecture, not fact):</b> this report's own text includes language associated with documented high-strangeness categories. Not a claim that anything paranormal occurred — a flag for the physical-vs-paranormal distinction only.</div>"""
+
         popup_html = f"""
         <div style="font-family:sans-serif; width:260px;">
-        <b style="color:#2b78e4;">{'📜' if source_label != 'BFRO' else '👣'} {s.get('title', 'Sighting Report')}</b><br>
+        <b style="color:{pin_color};">{source_icon} {s.get('title', 'Sighting Report')}</b><br>
         <small><b>Source:</b> {source_label} | <b>Class:</b> {s.get('class_rating', 'Class A')} | <b>Weight:</b> {s.get('evidence_weight', 1.0)}x</small><br>
         <hr style="margin:4px 0;">
         <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px;">{raw_summary[:160]}...</p>
+        {anomalous_note}
         {infrasound_note}
         {link_html}
         </div>
         """
-        marker_icon = "📜" if source_label != "BFRO" else "👣"
-        folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=280), icon=folium.DivIcon(html=f"""<div style="font-size:16px;">{marker_icon}</div>""", icon_size=(20, 20), icon_anchor=(10, 10))).add_to(m)
+        # Real colorable SVG footprint, not an emoji -- purple = content-flagged as
+        # containing high-strangeness language, blue = standard biological sighting.
+        # Dots were the old marker shape; kept available for other future layers per
+        # Max's request, footprints are now reserved for sightings specifically.
+        footprint_svg = f"""<svg width="18" height="18" viewBox="0 0 24 24" style="filter: drop-shadow(0 0 1px white);"><ellipse cx="12" cy="15" rx="4.2" ry="8.5" fill="{pin_color}"/><ellipse cx="7.5" cy="5" rx="1.3" ry="2.1" fill="{pin_color}"/><ellipse cx="10.5" cy="3.2" rx="1.4" ry="2.3" fill="{pin_color}"/><ellipse cx="13.7" cy="3.5" rx="1.3" ry="2.2" fill="{pin_color}"/><ellipse cx="16.5" cy="5" rx="1.2" ry="1.9" fill="{pin_color}"/><ellipse cx="18.7" cy="7.5" rx="1.0" ry="1.5" fill="{pin_color}"/></svg>"""
+        folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=280), icon=folium.DivIcon(html=footprint_svg, icon_size=(20, 20), icon_anchor=(10, 16))).add_to(m)
 
 # Campsites Layer
 if show_camps and camps_data:
