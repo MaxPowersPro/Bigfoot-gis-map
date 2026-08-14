@@ -282,6 +282,28 @@ def classify_infrasound_type(event_type_str):
         return "biological"
     return None
 
+# ---- Evidence Pattern Scanner: keyword-based behavior detection across sightings ----
+EVIDENCE_CATEGORIES = {
+    "Tracks / Footprints": ["track", "footprint", "print", "cast"],
+    "Vocalizations": ["whoop", "howl", "scream", "whistle", "vocal", "holler", "yell", "call"],
+    "Tree Knocks": ["knock", "banging", "wood knock"],
+    "Rock Throwing": ["rock", "stone", "thrown", "throw"],
+    "Distinctive Odor": ["smell", "odor", "stench", "stink", "foul"],
+}
+
+def scan_evidence_patterns(sightings):
+    """Scans each sighting's title+summary for known evidence/behavior keywords.
+    Returns {category: [{report, season}, ...]} -- pure text matching, no claim about
+    what actually happened, just what the report text mentions."""
+    results = {cat: [] for cat in EVIDENCE_CATEGORIES}
+    for s in sightings:
+        text = f"{s.get('title', '')} {s.get('summary', '')}".lower()
+        season = get_season(s.get("event_date", "N/A"))
+        for category, keywords in EVIDENCE_CATEGORIES.items():
+            if any(kw in text for kw in keywords):
+                results[category].append({"report": s, "season": season})
+    return results
+
 # ---- Black-bear-census-style weighting formulas (kept from the current live app) ----
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
     """Models how much a location's report count is inflated/suppressed by human access & population,
@@ -1016,6 +1038,39 @@ with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
                     st.error(f"Couldn't read that file: {e}")
 
         st.caption("Saving or sharing a search area (not just these model settings) is on the list for later — not part of this drawer yet.")
+
+# ==========================================
+# DRAWER: EVIDENCE PATTERN SCANNER (advanced — collapsed, same "off to the side"
+# placement as the Math & Science Drawer so it doesn't compete for tab space)
+# ==========================================
+with st.expander("🔍 Evidence Pattern Scanner (Advanced)", expanded=False):
+    st.caption(f"Scans every sighting in this sector ({loc_name}) for recurring behavioral evidence — pure keyword matching against report text, shown with a seasonal breakdown. Not a claim about what happened, just what gets mentioned and when.")
+
+    if not sightings_data:
+        st.info("No sightings in this sector to scan yet.")
+    else:
+        evidence_results = scan_evidence_patterns(sightings_data)
+        total = len(sightings_data)
+
+        for category, matches in evidence_results.items():
+            count = len(matches)
+            pct = (count / total * 100) if total else 0
+            with st.expander(f"{category}: {count} of {total} reports ({pct:.0f}%)"):
+                if count == 0:
+                    st.caption("No matches in this sector.")
+                else:
+                    season_counts = {}
+                    for m in matches:
+                        season_counts[m["season"]] = season_counts.get(m["season"], 0) + 1
+                    season_line = " | ".join(f"{s}: {c}" for s, c in season_counts.items())
+                    st.write(f"**By season:** {season_line}")
+                    st.caption("Time-of-day breakdown isn't available yet — BFRO's export doesn't include it, and it needs a small addition to the John Green data pass. On the list.")
+                    st.markdown("**Matching reports:**")
+                    for m in matches[:10]:
+                        r = m["report"]
+                        st.write(f"- {r.get('title', 'Untitled')} ({r.get('event_date', 'N/A')}, {m['season']}) — *{r.get('source', 'BFRO')}*")
+                    if count > 10:
+                        st.caption(f"...and {count - 10} more.")
 
 # ==========================================
 # DRAWER: RESTORED CURATED RESEARCH LIBRARY (nationwide reference vault)
