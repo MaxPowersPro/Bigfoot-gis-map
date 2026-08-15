@@ -531,22 +531,35 @@ if raw_sightings:
                 s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
                 sightings_data.append(s)
 
-# Process Local Lore (Includes Wampanoag / Local Tribal Filtering)
+# Full, unfiltered datasets for the Research Library -- genuinely nationwide, not
+# accidentally scoped to whatever's near the current search location. This was a real
+# bug: the Research Library used to search the already-locally-filtered lore_data/
+# media_data instead of everything.
+all_lore_records = [item.get("metadata", item) for item in raw_lore] if raw_lore else []
+all_press_records = [item.get("metadata", item) for item in raw_news] if raw_news else []
+
+# Process Local Lore -- each entity has its own real relevance_radius_miles reflecting
+# how localized vs. broadly regional that specific tradition actually is (a single
+# named rock vs. a whole coastal nation's territory), rather than one generic multiplier
+# for everything. Replaces the old state-name-substring fallback entirely, which is what
+# caused the stale-Massachusetts-default bug -- clean distance-only matching now.
 if raw_lore:
     for item in raw_lore:
         record = item.get("metadata", item)
         l_lat = float(record.get("latitude", lat))
         l_lon = float(record.get("longitude", lon))
-        if haversine_miles(lat, lon, l_lat, l_lon) <= (radius_miles * 2.0) or active_state.lower() in str(record.get("region_label", "")).lower():
+        entry_radius = float(record.get("relevance_radius_miles", 100))
+        if haversine_miles(lat, lon, l_lat, l_lon) <= entry_radius:
             lore_data.append(record)
 
-# Process Local Press Archives (~100 mile-ish radius via radius_miles * 1.5, or state match)
+# Process Local Press Archives -- same real-relevance-radius approach, no state fallback.
 if raw_news:
     for item in raw_news:
         record = item.get("metadata", item)
         m_lat = float(record.get("latitude", lat))
         m_lon = float(record.get("longitude", lon))
-        if haversine_miles(lat, lon, m_lat, m_lon) <= (radius_miles * 1.5) or active_state.lower() in str(record.get("state", "")).lower():
+        entry_radius = float(record.get("relevance_radius_miles", 30))
+        if haversine_miles(lat, lon, m_lat, m_lon) <= entry_radius:
             media_data.append(record)
 
 # Process Local Campsites
@@ -1147,33 +1160,137 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 
     if "Lore" in lib_choice:
         st.subheader("🪶 Indigenous Ethnographic Lore & Local Tribal Finder")
-        search_lore_term = st.text_input("🔍 Search Lore (e.g., Wampanoag, Maushop, Pukwudgie, Sasquatch, Wood Knock):", key="lore_search_box")
-        filtered_lore = lore_data
-        if search_lore_term:
-            filtered_lore = [item for item in lore_data if search_lore_term.lower() in str(item).lower()]
-        st.write(f"Displaying **{len(filtered_lore)}** ethnographic records:")
-        for item in filtered_lore:
+        lore_view = st.radio("View:", ["🔍 Search", "📖 Browse A-Z", "🗂️ Browse by Category", "🔗 Shared Traits"], horizontal=True, key="lore_view_mode")
+
+        def categorize_lore_entity(item):
+            text = f"{item.get('entity_nature', '')} {item.get('entity_name', '')}".lower()
+            if "not yet independently verified" in text or "carried over" in text:
+                return "❔ Carried Over — Not Yet Independently Verified"
+            if "trickster" in text or "little people" in text:
+                return "🧚 Small Trickster / Little People Spirits"
+            if "stone" in text or "stonish" in text:
+                return "🪨 Stone Giants"
+            if "malevolent" in text or "ogre" in text:
+                return "👹 Malevolent Giants / Ogres"
+            if "primordial" in text or "myth-time" in text:
+                return "⚡ Primordial Myth-Time Monsters (already defeated in origin stories)"
+            if "culture-hero" in text:
+                return "🌟 Benevolent Culture-Hero Giants"
+            if "guardian" in text or "wildman" in text:
+                return "🦍 Giant Wildman / Guardian Figures"
+            return "🗂️ Other"
+
+        def render_lore_entry(item):
             tribe = item.get('tribe_name', item.get('tribe', 'Indigenous Record'))
             entity = item.get('entity_name', item.get('title', 'Entity'))
             narrative = item.get('full_narrative', item.get('summary', ''))
+            nature = item.get('entity_nature', '')
+            status = item.get('verification_status', '')
             st.markdown(f"### 🪶 {tribe} — *{entity}*")
+            if nature:
+                st.caption(f"**Nature:** {nature}")
             st.caption(f"> {narrative}")
+            if status:
+                st.caption(f"_Status: {status}_")
+            ref = item.get('reference_url')
+            if ref:
+                st.markdown(f"[Source]({ref})")
             st.markdown("---")
+
+        if lore_view == "🔍 Search":
+            search_lore_term = st.text_input("🔍 Search Lore (e.g., Wampanoag, Maushop, Pukwudgie, Sasquatch, Wood Knock):", key="lore_search_box")
+            filtered_lore = all_lore_records
+            if search_lore_term:
+                filtered_lore = [item for item in all_lore_records if search_lore_term.lower() in str(item).lower()]
+            st.write(f"Displaying **{len(filtered_lore)}** ethnographic records (searching the full nationwide database, not just this sector):")
+            for item in filtered_lore:
+                render_lore_entry(item)
+
+        elif lore_view == "📖 Browse A-Z":
+            tribes_sorted = sorted(set(item.get('tribe_name', 'Unknown') for item in all_lore_records))
+            selected_tribe = st.selectbox("Jump to tribe:", ["All tribes"] + tribes_sorted, key="lore_az_select")
+            display_list = all_lore_records if selected_tribe == "All tribes" else [i for i in all_lore_records if i.get('tribe_name') == selected_tribe]
+            for item in sorted(display_list, key=lambda x: str(x.get('tribe_name', ''))):
+                render_lore_entry(item)
+
+        elif lore_view == "🗂️ Browse by Category":
+            categories = {}
+            for item in all_lore_records:
+                cat = categorize_lore_entity(item)
+                categories.setdefault(cat, []).append(item)
+            st.caption("Categories are derived from each entity's own documented nature, not guessed at click-time.")
+            for cat_name in sorted(categories.keys()):
+                items = categories[cat_name]
+                with st.expander(f"{cat_name} ({len(items)})"):
+                    for item in items:
+                        render_lore_entry(item)
+
+        elif lore_view == "🔗 Shared Traits":
+            st.caption("Cross-referencing physical and paranormal indicators across every entity — pure text matching, showing where traits recur across otherwise unrelated cultures.")
+            trait_keywords = {
+                "Giant stature": ["giant", "immense size", "larger than"],
+                "Hairy / fur-covered": ["hair", "hairy", "fur"],
+                "Rock/stone throwing or stone-skinned": ["rock", "stone"],
+                "Cannibalistic": ["cannibal"],
+                "Telepathy / mind control": ["telepath", "mind", "read"],
+                "Shapeshifting": ["shapeshift", "transform"],
+                "Large footprints": ["footprint", "impression"],
+            }
+            trait_matches = {trait: [] for trait in trait_keywords}
+            for item in all_lore_records:
+                combined = f"{item.get('physical_indicators', '')} {item.get('paranormal_indicators', '')} {item.get('full_narrative', '')} {item.get('entity_nature', '')}".lower()
+                for trait, keywords in trait_keywords.items():
+                    if any(kw in combined for kw in keywords):
+                        trait_matches[trait].append(f"{item.get('tribe_name', '')} — {item.get('entity_name', '')}")
+            for trait, matches in trait_matches.items():
+                if matches:
+                    with st.expander(f"{trait} ({len(matches)} entities)"):
+                        for m in matches:
+                            st.write(f"- {m}")
 
     elif "Press" in lib_choice:
         st.subheader("📰 Historical Press Archives & Media Scans")
-        search_press_term = st.text_input("🔍 Search News Archives (e.g., Whitehall, Tracks, Ravine, Hunter):", key="press_search_box")
-        filtered_press = media_data
-        if search_press_term:
-            filtered_press = [item for item in media_data if search_press_term.lower() in str(item).lower()]
-        st.write(f"Displaying **{len(filtered_press)}** newspaper archives:")
-        for item in filtered_press:
+        press_view = st.radio("View:", ["🔍 Search", "📅 Browse Chronologically", "🗺️ Browse by State"], horizontal=True, key="press_view_mode")
+
+        def render_press_entry(item):
             title = item.get('title', item.get('headline', 'Article'))
             p_date = item.get('pub_date', item.get('event_date', 'Historical'))
+            pub = item.get('publication_name', item.get('source', ''))
             text = item.get('full_text_transcript', item.get('summary', ''))
+            status = item.get('verification_status', '')
             st.markdown(f"### {title} ({p_date})")
+            if pub:
+                st.caption(f"**Publication:** {pub}")
             st.info(text)
+            if status:
+                st.caption(f"_Status: {status}_")
+            ref = item.get('article_url')
+            if ref:
+                st.markdown(f"[Source]({ref})")
             st.markdown("---")
+
+        if press_view == "🔍 Search":
+            search_press_term = st.text_input("🔍 Search News Archives (e.g., Whitehall, Tracks, Ravine, Hunter):", key="press_search_box")
+            filtered_press = all_press_records
+            if search_press_term:
+                filtered_press = [item for item in all_press_records if search_press_term.lower() in str(item).lower()]
+            st.write(f"Displaying **{len(filtered_press)}** newspaper archives (searching the full nationwide database, not just this sector):")
+            for item in filtered_press:
+                render_press_entry(item)
+
+        elif press_view == "📅 Browse Chronologically":
+            def sort_key(item):
+                d = str(item.get('pub_date', ''))
+                return d
+            for item in sorted(all_press_records, key=sort_key):
+                render_press_entry(item)
+
+        elif press_view == "🗺️ Browse by State":
+            states_sorted = sorted(set(str(item.get('state', 'Unknown')) for item in all_press_records))
+            selected_state = st.selectbox("Jump to state:", ["All states"] + states_sorted, key="press_state_select")
+            display_list = all_press_records if selected_state == "All states" else [i for i in all_press_records if str(i.get('state', '')) == selected_state]
+            for item in display_list:
+                render_press_entry(item)
 
     elif "Primate" in lib_choice or "Biology" in lib_choice:
         st.subheader("🐒 Comparative Primate & Hominid Biology Vault")
