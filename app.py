@@ -40,7 +40,10 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
     try:
         df = pd.read_csv(path)
     except Exception:
-        return []
+        try:
+            df = pd.read_csv(path, engine="python", on_bad_lines="skip")
+        except Exception:
+            return []
 
     records = []
     for _, row in df.iterrows():
@@ -72,7 +75,15 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
     try:
         df = pd.read_csv(path)
     except Exception:
-        return []
+        try:
+            # A single malformed row (stray comma/quote in the free-text narrative or
+            # citation fields) can make the strict parser fail the WHOLE file silently,
+            # returning zero sightings with no visible error. Same class of bug already
+            # found and fixed in the research scripts -- this fallback carries that same
+            # fix into the live app.
+            df = pd.read_csv(path, engine="python", on_bad_lines="skip")
+        except Exception:
+            return []
 
     records = []
     for _, row in df.iterrows():
