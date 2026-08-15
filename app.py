@@ -47,6 +47,7 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
 
     records = []
     for _, row in df.iterrows():
+        real_terrain = row.get("terrain_roughness_score")
         records.append({
             "id": str(row.get("report_id", "")),
             "report_id": str(row.get("report_id", "")),
@@ -58,6 +59,7 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
             "class_rating": str(row.get("class_rating", "Unclassified")) if pd.notna(row.get("class_rating")) else "Unclassified",
             "county": str(row.get("county", "")) if pd.notna(row.get("county")) else "",
             "source": "BFRO",
+            "real_terrain_roughness": float(real_terrain) if pd.notna(real_terrain) else None,
         })
     return records
 
@@ -95,6 +97,7 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
         narrative = str(row.get("i_account_of_incident", "")) if pd.notna(row.get("i_account_of_incident")) else ""
         summary_text = narrative if narrative else f"(No narrative on file — citation: {citation})"
 
+        real_terrain = row.get("terrain_roughness_score")
         records.append({
             "id": f"JG-{row.get('i_incident_id', '')}",
             "report_id": f"JG-{row.get('i_incident_id', '')}",
@@ -109,6 +112,7 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
             "county": str(row.get("i_county", "")) if pd.notna(row.get("i_county")) else "",
             "state": state,
             "source": "John Green Historical Archive",
+            "real_terrain_roughness": float(real_terrain) if pd.notna(real_terrain) else None,
         })
     return records
 
@@ -518,7 +522,13 @@ if raw_sightings:
                 s["audit_explanation"] = weight_dict["audit_explanation"]
 
                 sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
-                s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, 0.6, 0.7)
+                if s.get("real_terrain_roughness") is not None:
+                    terrain_input = s["real_terrain_roughness"]
+                    s["terrain_data_source"] = "real (USGS elevation-derived)"
+                else:
+                    terrain_input = 0.6
+                    s["terrain_data_source"] = "placeholder (not yet farmed for this report)"
+                s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
                 sightings_data.append(s)
 
 # Process Local Lore (Includes Wampanoag / Local Tribal Filtering)
@@ -633,6 +643,10 @@ if show_bfro and sightings_data:
         if is_anomalous:
             anomalous_note = """<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">👻 <b>Content flag (conjecture, not fact):</b> this report's own text includes language associated with documented high-strangeness categories. Not a claim that anything paranormal occurred — a flag for the physical-vs-paranormal distinction only.</div>"""
 
+        terrain_source = s.get("terrain_data_source", "placeholder (not yet farmed for this report)")
+        terrain_icon = "🟢" if "real" in terrain_source else "⚪"
+        terrain_note = f"""<div style="margin-top:2px; font-size:8px; color:#888;">{terrain_icon} ESI terrain input: {terrain_source}</div>"""
+
         popup_html = f"""
         <div style="font-family:sans-serif; width:260px;">
         <b style="color:{pin_color};">{source_icon} {s.get('title', 'Sighting Report')}</b><br>
@@ -641,6 +655,7 @@ if show_bfro and sightings_data:
         <p style="font-size:10px; margin:2px 0; background:#f8f9fa; padding:4px;">{raw_summary[:160]}...</p>
         {anomalous_note}
         {infrasound_note}
+        {terrain_note}
         {link_html}
         </div>
         """
@@ -982,7 +997,7 @@ with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
             """)
             st.write("**Why we use it:** a sighting only tells you where something was *seen*. ESI is the app's attempt to estimate where something *could live*, sightings or not — the core of the whole 'search where he should be, not just where he was' idea.")
             st.write("**Where it's used:** drives the Predictive Refuge Zone trigger (#6).")
-            st.warning("**Honest limitation:** water proximity, terrain roughness, and prey biomass are currently placeholder constants, not real per-location data — hooking up real terrain/hydrology data is on the data-farming list.")
+            st.warning("**Honest limitation:** terrain roughness is now real, USGS elevation-derived data for reports that have been farmed (each sighting's popup shows which kind it got). Water proximity and prey biomass are still placeholder constants, not real per-location data — hooking those up is still on the data-farming list.")
 
         with st.expander("5️⃣ Hot Zone Clustering"):
             st.write("""
