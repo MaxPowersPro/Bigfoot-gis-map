@@ -83,6 +83,23 @@ def load_junk_drawer_data(path="data/junk_drawer.csv"):
             return []
     return df.to_dict("records")
 
+def load_researcher_archives_data(path="data/researcher_archives.csv"):
+    """Loads the Researcher Archives reference file - same pattern as the Junk Drawer
+    loader, since this data isn't tied to a location either and the generic loader
+    would silently return nothing for it."""
+    import pandas as pd
+    import os
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        try:
+            df = pd.read_csv(path, engine="python", on_bad_lines="skip")
+        except Exception:
+            return []
+    return df.to_dict("records")
+
 def load_john_green_data(path="data/john_green_incidents_clean.csv"):
     """Loads John Green's historical sasquatch database (public domain), building
     sighting records from its real columns rather than forcing it through the
@@ -141,6 +158,9 @@ raw_news = load_and_standardize_dataset("data/press_archives.csv")
 raw_camps = load_and_standardize_dataset("data/campsites.csv")  # optional - app runs fine if this file doesn't exist yet
 raw_junk = load_junk_drawer_data()  # optional - app runs fine if this file doesn't exist yet
 all_junk_records = raw_junk
+
+raw_researcher_archives = load_researcher_archives_data()  # optional - app runs fine if this file doesn't exist yet
+KRANTZ_PDF_URL = "https://raw.githubusercontent.com/MaxPowersPro/Bigfoot-gis-map/main/data/krantz_finding_aid.pdf"
 
 # Check visitor browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
@@ -1173,7 +1193,7 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
     st.caption("Nationwide ethnographic archives, historical media scans, comparative primate biology, and behavioral search toolsets.")
     lib_choice = st.radio(
         "Select Vault Section:",
-        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🐒 Comparative Primate Biology & Morphology", "🔊 Infrasound Physics", "👣📜 Sightings & Historical Accounts"],
+        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🐒 Comparative Primate Biology & Morphology", "🔊 Infrasound Physics", "👣📜 Sightings & Historical Accounts", "🔬 Researcher Archives"],
         horizontal=True
     )
     st.markdown("---")
@@ -1399,6 +1419,27 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
                 st.markdown(f"[📄 View Full BFRO Report #{raw_id}](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
             st.markdown("---")
 
+    elif "Researcher Archives" in lib_choice:
+        st.subheader("🔬 Researcher Archives")
+        st.caption("Where the foundational Sasquatch researchers' actual working materials live — not just their published books. Verification status shown honestly for each claim.")
+
+        if not raw_researcher_archives:
+            st.info("Researcher archives file not found or empty.")
+        else:
+            for item in raw_researcher_archives:
+                st.markdown(f"### {item.get('researcher_name', 'Unknown')}")
+                st.write(f"**Credentials:** {item.get('credentials', '')}")
+                st.write(f"**Stance:** {item.get('stance', '')}")
+                st.write(f"**Key publications:** {item.get('key_publications', '')}")
+                st.write(f"**Where their materials actually live:** {item.get('archive_location', '')}")
+                st.write(f"**Access:** {item.get('archive_access', '')}")
+                st.caption(f"_Verification: {item.get('verification_status', '')}_")
+                ref = item.get('reference_url')
+                if ref and str(ref) != "nan":
+                    st.markdown(f"[Source]({ref})")
+                if "Krantz" in str(item.get('researcher_name', '')):
+                    st.markdown(f"[📄 Download the real Krantz finding aid PDF]({KRANTZ_PDF_URL})")
+                st.markdown("---")
 
 # ==========================================
 # DRAWER: JUNK DRAWER — standalone, sitting beneath the Research Library, not nested
@@ -1498,4 +1539,3 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
-        
