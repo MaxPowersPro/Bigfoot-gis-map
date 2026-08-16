@@ -1438,7 +1438,33 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
                 if ref and str(ref) != "nan":
                     st.markdown(f"[Source]({ref})")
                 if "Krantz" in str(item.get('researcher_name', '')):
-                    st.markdown(f"[📄 Download the real Krantz finding aid PDF]({KRANTZ_PDF_URL})")
+                    st.markdown("**The actual finding aid — read it right here, no download needed:**")
+                    st.components.v1.iframe(KRANTZ_PDF_URL, height=600, scrolling=True)
+                    st.caption("If the viewer above doesn't load on your device, the key content is also written out below.")
+                    with st.expander("📖 Key contents, extracted as text (fallback / quick read)"):
+                        st.markdown("""
+**Collection:** Grover Sanders Krantz papers, NAA.2003-21, National Anthropological Archives, Smithsonian Institution
+**Dates:** 1904-2001 (bulk 1955-2001) — 7.38 linear feet, 14 manuscript boxes, 47 floppy disks, 9 audio cassettes
+
+**The 9 series:**
+1. Correspondence, 1964, 1974-2001
+2. Writings, 1955-2001
+3. Research, 1959-2001
+4. Professional Activities, 1958-2001
+5. **Sasquatch, 1963-2001**
+6. Teaching, 1957-2001
+7. Biographical and Personal Files, 1904-1911, 1931, 1952-2002
+8. Sound Recordings, 1988-1997, undated
+9. Electronic Records, 1987-2001
+
+**Real Sasquatch-specific publications from his bibliography:**
+- "Anatomy and Dermatoglyphics of Three Sasquatch Footprints," *Cryptozoology* 2 (1983): 53-81
+- "A Reconstruction of the Skull of *Gigantopithecus blacki* and a Comparison with a Living Form," *Cryptozoology* 5 (1987): 24-39
+- *Big Footprints: A Scientific Inquiry into the Reality of Sasquatch* (1992)
+- *Bigfoot Sasquatch Evidence* (1999)
+
+**Note worth knowing before requesting anything:** some materials in the collection are written in "noospel," a phonetic spelling system Krantz invented himself — not everything is straightforwardly readable even once accessed. Access to the physical papers requires an appointment with the National Anthropological Archives; the finding aid itself (what you're reading here) is public domain (CC0).
+                        """)
                 st.markdown("---")
 
 # ==========================================
@@ -1539,3 +1565,4 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
+        
