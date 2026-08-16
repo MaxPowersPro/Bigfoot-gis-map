@@ -1438,10 +1438,8 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
                 if ref and str(ref) != "nan":
                     st.markdown(f"[Source]({ref})")
                 if "Krantz" in str(item.get('researcher_name', '')):
-                    st.markdown("**The actual finding aid — read it right here, no download needed:**")
-                    st.components.v1.iframe(KRANTZ_PDF_URL, height=600, scrolling=True)
-                    st.caption("If the viewer above doesn't load on your device, the key content is also written out below.")
-                    with st.expander("📖 Key contents, extracted as text (fallback / quick read)"):
+                    st.markdown("**The real finding aid, extracted and readable right here — no download, no embedding tricks that break:**")
+                    with st.expander("📖 Key contents from the real finding aid", expanded=True):
                         st.markdown("""
 **Collection:** Grover Sanders Krantz papers, NAA.2003-21, National Anthropological Archives, Smithsonian Institution
 **Dates:** 1904-2001 (bulk 1955-2001) — 7.38 linear feet, 14 manuscript boxes, 47 floppy disks, 9 audio cassettes
@@ -1465,6 +1463,8 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 
 **Note worth knowing before requesting anything:** some materials in the collection are written in "noospel," a phonetic spelling system Krantz invented himself — not everything is straightforwardly readable even once accessed. Access to the physical papers requires an appointment with the National Anthropological Archives; the finding aid itself (what you're reading here) is public domain (CC0).
                         """)
+                    st.caption("Want the actual full PDF instead of this summary? It opens as a plain, ordinary link — no embedding, no loop.")
+                    st.markdown(f"[📄 Open the real finding aid PDF]({KRANTZ_PDF_URL})")
                 st.markdown("---")
 
 # ==========================================
@@ -1565,4 +1565,3 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
-        
