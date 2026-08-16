@@ -121,6 +121,8 @@ raw_sightings = raw_sightings_bfro + raw_sightings_john_green
 raw_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
 raw_news = load_and_standardize_dataset("data/press_archives.csv")
 raw_camps = load_and_standardize_dataset("data/campsites.csv")  # optional - app runs fine if this file doesn't exist yet
+raw_junk = load_and_standardize_dataset("data/junk_drawer.csv")  # optional - app runs fine if this file doesn't exist yet
+all_junk_records = [item.get("metadata", item) for item in raw_junk] if raw_junk else []
 
 # Check visitor browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
@@ -1378,6 +1380,53 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
             if raw_id.isdigit():
                 st.markdown(f"[📄 View Full BFRO Report #{raw_id}](https://www.bfro.net/GDB/show_report.asp?id={raw_id})")
             st.markdown("---")
+
+
+# ==========================================
+# DRAWER: JUNK DRAWER — standalone, sitting beneath the Research Library, not nested
+# inside it. Misleading citations, misattributed entities, conspiracy theories, and
+# pseudoscience — acknowledged and explained, never endorsed. Every entry shows both a
+# quick bullet "nutshell" and the full engaging writeup, since not everyone reads the
+# same way.
+# ==========================================
+with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pseudoscience", expanded=False):
+    st.caption("This is exactly why science stays skeptical of Bigfoot research — and exactly what a serious research tool needs to be honest about. Acknowledged and explained here, never endorsed.")
+
+    if not all_junk_records:
+        st.info("Junk Drawer file not found or empty.")
+    else:
+        overview_items = [i for i in all_junk_records if i.get("drawer_tab") == "Overview"]
+        if overview_items:
+            st.markdown("### 🚩 How To Spot This Stuff — Real Patterns Found In Our Own Research")
+            for item in overview_items:
+                st.write(f"- **{item.get('item_name', '').replace('Red Flag: ', '')}** — {item.get('nutshell', item.get('why_its_wrong', ''))}")
+            st.markdown("---")
+
+        def render_junk_entry(item):
+            nutshell = item.get('nutshell')
+            st.markdown(f"#### 🗑️ {item.get('item_name', 'Untitled')}")
+            if nutshell and str(nutshell) != "nan":
+                st.info(f"**In a nutshell:** {nutshell}")
+            with st.expander("Full story"):
+                claimed = item.get('what_gets_claimed', '')
+                if claimed and "N/A" not in str(claimed):
+                    st.markdown(f"**What gets claimed:** {claimed}")
+                st.error(f"**Why it's wrong:** {item.get('why_its_wrong', '')}")
+                ref = item.get('reference_url')
+                if ref and str(ref) != "nan":
+                    st.markdown(f"[Source]({ref})")
+            st.markdown("---")
+
+        junk_tab1, junk_tab2, junk_tab3, junk_tab4 = st.tabs(["🪶 Indigenous", "📰 Media", "🕵️ Conspiracy", "👻 Paranormal Bigfoot"])
+        tab_map = {"Indigenous": junk_tab1, "Media": junk_tab2, "Conspiracy": junk_tab3, "Paranormal Bigfoot": junk_tab4}
+        for tab_name, tab_obj in tab_map.items():
+            with tab_obj:
+                tab_items = [i for i in all_junk_records if i.get("drawer_tab") == tab_name]
+                if not tab_items:
+                    st.info("Nothing filed here yet.")
+                for item in tab_items:
+                    render_junk_entry(item)
+
 
 # ==========================================
 # DRAWER: RESTORED INVESTIGATOR FIELD LOG SUBMISSION (was a stub with no actual form)
