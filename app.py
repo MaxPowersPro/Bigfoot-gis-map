@@ -65,6 +65,24 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
 
 raw_sightings_bfro = load_bfro_clean_data()
 
+def load_junk_drawer_data(path="data/junk_drawer.csv"):
+    """Loads the Junk Drawer data directly - NOT through the generic loader, since that
+    one requires latitude/longitude columns and silently returns nothing without them.
+    Junk Drawer entries aren't tied to a location at all, which is exactly what caused
+    the 'file not found or empty' bug even though the file was correctly named."""
+    import pandas as pd
+    import os
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        try:
+            df = pd.read_csv(path, engine="python", on_bad_lines="skip")
+        except Exception:
+            return []
+    return df.to_dict("records")
+
 def load_john_green_data(path="data/john_green_incidents_clean.csv"):
     """Loads John Green's historical sasquatch database (public domain), building
     sighting records from its real columns rather than forcing it through the
@@ -121,8 +139,8 @@ raw_sightings = raw_sightings_bfro + raw_sightings_john_green
 raw_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
 raw_news = load_and_standardize_dataset("data/press_archives.csv")
 raw_camps = load_and_standardize_dataset("data/campsites.csv")  # optional - app runs fine if this file doesn't exist yet
-raw_junk = load_and_standardize_dataset("data/junk_drawer.csv")  # optional - app runs fine if this file doesn't exist yet
-all_junk_records = [item.get("metadata", item) for item in raw_junk] if raw_junk else []
+raw_junk = load_junk_drawer_data()  # optional - app runs fine if this file doesn't exist yet
+all_junk_records = raw_junk
 
 # Check visitor browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
@@ -1480,3 +1498,4 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
+        
