@@ -1154,6 +1154,112 @@ with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
         st.caption("Saving or sharing a search area (not just these model settings) is on the list for later — not part of this drawer yet.")
 
 # ==========================================
+# DRAWER: NATIONAL ZONE CONSISTENCY PROOF (Experimental)
+# Completely isolated from the live map — no folium, no map rendering, plain Streamlit
+# only. This exists to safely prove out the "compute zones once, nationally" idea before
+# the map itself ever touches it again, after the last attempt broke the map with no
+# visible error. If anything here fails, the map above is completely unaffected, since
+# this code runs after the map has already fully rendered.
+# ==========================================
+with st.expander("🧪 National Zone Consistency Proof (Experimental)", expanded=False):
+    st.caption("Proves whether two nearby points would see the SAME Hot Zones/Refuges — the actual thing being fixed — without touching the live map at all. Safe to experiment with.")
+
+    @st.cache_data(ttl=86400, show_spinner=True)
+    def proof_weight_all_sightings(all_sightings, effort_k):
+        processed = []
+        for s in all_sightings:
+            s = dict(s)
+            s_lat, s_lon = s.get("latitude"), s.get("longitude")
+            if s_lat is None or s_lon is None:
+                continue
+            event_d_str = s.get('event_date', 'N/A')
+            try: ev_month = int(str(event_d_str).split('-')[1])
+            except Exception: ev_month = 6
+            s_dist_road = float(s.get("dist_to_road_miles", 0.4))
+            s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
+            eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
+            has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
+            class_rat = s.get("class_rating", "Class A")
+            weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=effort_k)
+            sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
+            terrain_input = s["real_terrain_roughness"] if s.get("real_terrain_roughness") is not None else 0.6
+            s["evidence_weight"] = weight_dict["final_weight"]
+            s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
+            processed.append(s)
+        return processed
+
+    @st.cache_data(ttl=86400, show_spinner=True)
+    def proof_compute_national_hubs(evidence_points, hotzone_radius_mi):
+        import datetime
+        if not evidence_points:
+            return {"hubs": [], "computed_at": None}
+        coords_arr = np.array([[p[0], p[1]] for p in evidence_points])
+        weights_arr = np.array([p[2] for p in evidence_points])
+        RADIUS_DEG = hotzone_radius_mi / 69.0
+        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
+        visited = set()
+        hubs = []
+        for i, pt in enumerate(coords_arr):
+            if i in visited: continue
+            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
+            if len(neighbors) >= 1:
+                hubs.append({
+                    "lat": float(np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])),
+                    "lon": float(np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])),
+                    "weight": float(np.sum(weights_arr[neighbors])), "count": int(len(neighbors)),
+                })
+                visited.update(neighbors)
+        return {"hubs": hubs, "computed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
+
+    if st.button("Run the national computation", key="run_national_proof"):
+        try:
+            proof_weighted = proof_weight_all_sightings(tuple(raw_sightings), st.session_state.param_effort_k) if raw_sightings else []
+            proof_points = tuple(
+                (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)))
+                for s in proof_weighted if not filter_urban(float(s["latitude"]), float(s["longitude"]))
+            )
+            proof_result = proof_compute_national_hubs(proof_points, st.session_state.param_hotzone_radius_mi)
+            st.session_state["_proof_result"] = proof_result
+            st.success(f"Computed {len(proof_result['hubs'])} national Hot Zones from {len(proof_weighted)} sightings.")
+        except Exception as e:
+            st.error(f"Something failed in the isolated computation (map above is unaffected): {e}")
+
+    if "_proof_result" in st.session_state:
+        proof_result = st.session_state["_proof_result"]
+        st.caption(f"🕒 Last computed: {proof_result.get('computed_at', 'never')}")
+
+        st.markdown("#### Test two nearby points")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Point A**")
+            a_lat = st.number_input("Latitude A", value=37.505, format="%.4f", key="proof_a_lat")
+            a_lon = st.number_input("Longitude A", value=-83.095, format="%.4f", key="proof_a_lon")
+        with col2:
+            st.markdown("**Point B**")
+            b_lat = st.number_input("Latitude B", value=37.495, format="%.4f", key="proof_b_lat")
+            b_lon = st.number_input("Longitude B", value=-83.115, format="%.4f", key="proof_b_lon")
+
+        display_buffer = st.slider("Display buffer (miles)", 10, 200, 40, key="proof_buffer")
+
+        hubs_a = [h for h in proof_result["hubs"] if haversine_miles(a_lat, a_lon, h["lat"], h["lon"]) <= display_buffer]
+        hubs_b = [h for h in proof_result["hubs"] if haversine_miles(b_lat, b_lon, h["lat"], h["lon"]) <= display_buffer]
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Point A sees", f"{len(hubs_a)} hub(s)")
+            for h in hubs_a:
+                st.caption(f"({h['lat']:.4f}, {h['lon']:.4f}) — weight {h['weight']:.1f}")
+        with col2:
+            st.metric("Point B sees", f"{len(hubs_b)} hub(s)")
+            for h in hubs_b:
+                st.caption(f"({h['lat']:.4f}, {h['lon']:.4f}) — weight {h['weight']:.1f}")
+
+        if hubs_a == hubs_b:
+            st.success("✅ Both points see the exact same zone data — the consistency fix works.")
+        else:
+            st.warning("Different results — worth a closer look before this ever touches the live map.")
+
+# ==========================================
 # DRAWER: EVIDENCE PATTERN SCANNER (advanced — collapsed, same "off to the side"
 # placement as the Math & Science Drawer so it doesn't compete for tab space)
 # ==========================================
