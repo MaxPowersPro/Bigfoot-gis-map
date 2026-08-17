@@ -1,6 +1,10 @@
 import streamlit as st
 import folium
-import folium.plugins
+try:
+    import folium.plugins
+    FOLIUM_PLUGINS_AVAILABLE = True
+except Exception:
+    FOLIUM_PLUGINS_AVAILABLE = False
 from streamlit_folium import st_folium
 from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
@@ -545,7 +549,7 @@ seasonal_breakdown = {}
 # shared computation, not two independently-generated ones. Cached for 24 hours or
 # until the next deploy (a redeploy clears the cache automatically), not recomputed on
 # every click.
-@st.cache_data(ttl=86400, show_spinner="Recalculating national zone data (this only happens periodically, not on every search)...")
+@st.cache_data(ttl=86400, show_spinner=True)
 def process_all_sightings_weighted(all_sightings, effort_k):
     processed = []
     local_seasonal = {}
@@ -912,7 +916,13 @@ else:
 
 # Real distance scale, since without the search-radius ring there was previously no way
 # to judge distance on the map at all
-folium.plugins.MeasureControl(position="bottomleft", primary_length_unit="miles").add_to(m)
+if FOLIUM_PLUGINS_AVAILABLE:
+    try:
+        folium.plugins.MeasureControl(position="bottomleft", primary_length_unit="miles").add_to(m)
+    except Exception as e:
+        st.caption(f"⚠️ Distance scale tool couldn't load ({e}) — map still works, just without that one feature.")
+else:
+    st.caption("⚠️ Distance scale tool isn't available in this environment — map still works, just without that one feature.")
 
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
