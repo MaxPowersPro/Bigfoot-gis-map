@@ -1,5 +1,6 @@
 import streamlit as st
 import folium
+import folium.plugins
 from streamlit_folium import st_folium
 from shapely.geometry import Point, Polygon
 from supabase import create_client, Client
@@ -538,38 +539,60 @@ for _pk, _pv in PARAM_DEFAULTS.items():
 sightings_data, camps_data, audio_data, media_data, lore_data, user_logs_data = [], [], [], [], [], []
 seasonal_breakdown = {}
 
-# Process Local Sightings
-if raw_sightings:
-    for s in raw_sightings:
+# Compute evidence weight + ESI for EVERY sighting nationally, once, cached -- not just
+# whoever's inside the current search radius. This is the fix for two people a mile
+# apart on the same road seeing different maps: their zones now come from the SAME
+# shared computation, not two independently-generated ones. Cached for 24 hours or
+# until the next deploy (a redeploy clears the cache automatically), not recomputed on
+# every click.
+@st.cache_data(ttl=86400, show_spinner="Recalculating national zone data (this only happens periodically, not on every search)...")
+def process_all_sightings_weighted(all_sightings, effort_k):
+    processed = []
+    local_seasonal = {}
+    for s in all_sightings:
+        s = dict(s)  # don't mutate the cached raw list
         s_lat, s_lon = s.get("latitude"), s.get("longitude")
-        if s_lat is not None and s_lon is not None:
-            if haversine_miles(lat, lon, float(s_lat), float(s_lon)) <= radius_miles:
-                event_d_str = s.get('event_date', 'N/A')
-                season = get_season(event_d_str)
-                seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
-                try: ev_month = int(str(event_d_str).split('-')[1])
-                except Exception: ev_month = 6
+        if s_lat is None or s_lon is None:
+            continue
+        event_d_str = s.get('event_date', 'N/A')
+        season = get_season(event_d_str)
+        local_seasonal[season] = local_seasonal.get(season, 0) + 1
+        try: ev_month = int(str(event_d_str).split('-')[1])
+        except Exception: ev_month = 6
 
-                s_dist_road = float(s.get("dist_to_road_miles", 0.4))
-                s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
-                eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
-                has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
-                class_rat = s.get("class_rating", "Class A")
-                weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=st.session_state.param_effort_k)
-                s["effort_factor"] = eff_factor
-                s["evidence_weight"] = weight_dict["final_weight"]
-                s["base_weight"] = weight_dict["base_weight"]
-                s["audit_explanation"] = weight_dict["audit_explanation"]
+        s_dist_road = float(s.get("dist_to_road_miles", 0.4))
+        s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
+        eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
+        has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
+        class_rat = s.get("class_rating", "Class A")
+        weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=effort_k)
+        s["effort_factor"] = eff_factor
+        s["evidence_weight"] = weight_dict["final_weight"]
+        s["base_weight"] = weight_dict["base_weight"]
+        s["audit_explanation"] = weight_dict["audit_explanation"]
 
-                sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
-                if s.get("real_terrain_roughness") is not None:
-                    terrain_input = s["real_terrain_roughness"]
-                    s["terrain_data_source"] = "real (USGS elevation-derived)"
-                else:
-                    terrain_input = 0.6
-                    s["terrain_data_source"] = "placeholder (not yet farmed for this report)"
-                s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
-                sightings_data.append(s)
+        sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
+        if s.get("real_terrain_roughness") is not None:
+            terrain_input = s["real_terrain_roughness"]
+            s["terrain_data_source"] = "real (USGS elevation-derived)"
+        else:
+            terrain_input = 0.6
+            s["terrain_data_source"] = "placeholder (not yet farmed for this report)"
+        s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
+        processed.append(s)
+    return processed, local_seasonal
+
+all_sightings_weighted = process_all_sightings_weighted(tuple(raw_sightings), st.session_state.param_effort_k) if raw_sightings else ([], {})
+all_sightings_processed, national_seasonal_breakdown = all_sightings_weighted
+
+# Local display is now just a distance FILTER of the shared national computation above,
+# not a separate computation -- two people at different points along the same road are
+# now filtering the exact same underlying weighted dataset, not generating their own.
+for s in all_sightings_processed:
+    if haversine_miles(lat, lon, float(s["latitude"]), float(s["longitude"])) <= radius_miles:
+        sightings_data.append(s)
+        season = get_season(s.get('event_date', 'N/A'))
+        seasonal_breakdown[season] = seasonal_breakdown.get(season, 0) + 1
 
 # Full, unfiltered datasets for the Research Library -- genuinely nationwide, not
 # accidentally scoped to whatever's near the current search location. This was a real
@@ -747,56 +770,50 @@ if show_user_logs and user_logs_data:
         log_popup = f"<b>📝 FIELD LOG</b><br><small>Type: {ulog.get('observation_type')}</small><br><p style='font-size:10px;'>{ulog.get('physical_evidence_notes') or ulog.get('field_narrative', '')}</p>"
         folium.Marker([ulog["latitude"], ulog["longitude"]], popup=log_popup, icon=folium.Icon(color="green" if has_facts else "orange", icon="clipboard", prefix="fa")).add_to(m)
 
-# RESTORED: Hot Zones, Predictive Refuges & The Larson Hypothesis corridors
-ground_truth_hubs, predictive_refuges = [], []
-combined_evidence_points = [
-    {"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0)), "esi": float(s.get("esi_score", 0.5))}
-    for s in sightings_data if not filter_urban(float(s["latitude"]), float(s["longitude"]))
-]
+# NATIONAL Hot Zones, Predictive Refuges & Larson Hypothesis corridors -- computed ONCE
+# across the entire dataset, cached, and shared by every user. This is the fix for two
+# people a mile apart on the same road seeing different zones: they're no longer each
+# generating their own private version relative to their own exact coordinates. Local
+# search now only controls what's DISPLAYED, not what's COMPUTED.
+@st.cache_data(ttl=86400, show_spinner=False)
+def compute_national_zones(evidence_points, hotzone_radius_mi, report_gap_mi, esi_threshold, corridor_max_mi):
+    import datetime
+    hubs, refuges, corridors = [], [], []
+    if not evidence_points:
+        return {"hubs": hubs, "refuges": refuges, "corridors": corridors, "computed_at": None}
 
-if show_hotspots and combined_evidence_points:
-    coords_arr = np.array([[pt["lat"], pt["lon"]] for pt in combined_evidence_points])
-    weights_arr = np.array([pt["weight"] for pt in combined_evidence_points])
+    coords_arr = np.array([[p[0], p[1]] for p in evidence_points])
+    weights_arr = np.array([p[2] for p in evidence_points])
+    esi_arr = np.array([p[3] for p in evidence_points])
+
+    RADIUS_DEG = hotzone_radius_mi / 69.0
     dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
     visited = set()
-    RADIUS_DEG = st.session_state.param_hotzone_radius_mi / 69.0
-
-    # Red Hot Zones: weighted density hubs (sightings + implicit press/lore boost via evidence_weight)
     for i, pt in enumerate(coords_arr):
         if i in visited: continue
         neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
         if len(neighbors) >= 1:
-            ground_truth_hubs.append({
-                "lat": np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors]),
-                "lon": np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors]),
+            hubs.append({
+                "lat": float(np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])),
+                "lon": float(np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])),
                 "weight": float(np.sum(weights_arr[neighbors])),
-                "count": len(neighbors)
+                "count": int(len(neighbors)),
             })
             visited.update(neighbors)
 
-    for hub in ground_truth_hubs:
-        folium.Circle(radius=8000 + (hub['weight'] * 1500), location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
+    # Predictive Refuges: scan a real grid at national scale using a FIXED degree step
+    # (not a fixed grid count) so resolution stays consistent regardless of how much
+    # territory the data spans -- a fixed grid_n would go badly coarse at national scale.
+    REPORT_GAP_DEG = report_gap_mi / 69.0
+    ESI_PROXY_RADIUS_DEG = 0.6
+    MIN_REFUGE_SEPARATION_DEG = 0.15
+    GRID_STEP_DEG = 0.3  # ~20 miles between grid points -- coarser than local was, appropriate for national scope
 
-    # Orange Predictive Refuges: grid-scanned for pockets with high inferred habitat suitability
-    # (ESI proxy from nearby reports) but near-zero direct sightings — matches Matt Larson's KY case,
-    # where the true habitat may be the *quiet* pocket surrounded by report activity, not just "far from everything."
-    # HONEST LIMITATION: we don't yet have real per-point terrain/hydrology data (that's a data-farming task),
-    # so the ESI proxy here is inverse-distance-weighted from nearby *known* reports' esi_score, not a true
-    # independent terrain calculation. Popups say so explicitly.
-    predictive_refuges = []
-    REPORT_GAP_DEG = st.session_state.param_report_gap_mi / 69.0
-    ESI_PROXY_RADIUS_DEG = 0.6  # ~41 miles — how far we'll look for nearby reports to infer local habitat quality
-    ESI_THRESHOLD = st.session_state.param_esi_threshold
-    MIN_REFUGE_SEPARATION_DEG = 0.15  # ~10 miles apart, so we don't cluster near-duplicate refuge circles
-
-    if len(combined_evidence_points) >= 3:
-        esi_arr = np.array([pt["esi"] for pt in combined_evidence_points])
+    if len(evidence_points) >= 3:
         min_lat_g, max_lat_g = coords_arr[:, 0].min(), coords_arr[:, 0].max()
         min_lon_g, max_lon_g = coords_arr[:, 1].min(), coords_arr[:, 1].max()
-        buffer_deg = 0.15
-        grid_n = 16
-        lat_grid = np.linspace(min_lat_g - buffer_deg, max_lat_g + buffer_deg, grid_n)
-        lon_grid = np.linspace(min_lon_g - buffer_deg, max_lon_g + buffer_deg, grid_n)
+        lat_grid = np.arange(min_lat_g - 0.15, max_lat_g + 0.15, GRID_STEP_DEG)
+        lon_grid = np.arange(min_lon_g - 0.15, max_lon_g + 0.15, GRID_STEP_DEG)
 
         candidates = []
         for g_lat in lat_grid:
@@ -806,28 +823,72 @@ if show_hotspots and combined_evidence_points:
                 dists_deg = np.sqrt((coords_arr[:, 0] - g_lat) ** 2 + (coords_arr[:, 1] - g_lon) ** 2)
                 nearest_report_deg = float(np.min(dists_deg))
                 if nearest_report_deg < REPORT_GAP_DEG:
-                    continue  # too close to an actual report — not a "quiet pocket"
-
+                    continue
                 in_radius = dists_deg <= ESI_PROXY_RADIUS_DEG
                 if not np.any(in_radius):
-                    continue  # no nearby data to infer habitat quality from at all
-
+                    continue
                 idw_weights = 1.0 / (dists_deg[in_radius] + 0.02) ** 2
                 esi_proxy = float(np.sum(idw_weights * esi_arr[in_radius]) / np.sum(idw_weights))
-                if esi_proxy >= ESI_THRESHOLD:
-                    candidates.append({"lat": g_lat, "lon": g_lon, "esi_proxy": esi_proxy, "gap_miles": nearest_report_deg * 69.0})
+                if esi_proxy >= esi_threshold:
+                    candidates.append({"lat": float(g_lat), "lon": float(g_lon), "esi_proxy": esi_proxy, "gap_miles": nearest_report_deg * 69.0})
 
-        # Keep only the strongest, well-separated candidates (avoid a wall of overlapping circles)
         candidates.sort(key=lambda c: c["esi_proxy"], reverse=True)
         for cand in candidates:
             too_close = any(
                 np.sqrt((cand["lat"] - kept["lat"]) ** 2 + (cand["lon"] - kept["lon"]) ** 2) < MIN_REFUGE_SEPARATION_DEG
-                for kept in predictive_refuges
+                for kept in refuges
             )
             if not too_close:
-                predictive_refuges.append(cand)
-            if len(predictive_refuges) >= 5:
+                refuges.append(cand)
+            if len(refuges) >= 150:  # national cap, generous -- display filtering trims it per-view
                 break
+
+    # Larson Hypothesis corridors, same distance-cap logic, run across ALL national hubs
+    LARSON_MAX_DEG = corridor_max_mi / 69.0
+    if len(hubs) > 1:
+        connected_pairs = set()
+        for i in range(len(hubs)):
+            h1 = hubs[i]
+            dists = [(np.sqrt((h1["lat"] - hubs[j]["lat"]) ** 2 + (h1["lon"] - hubs[j]["lon"]) ** 2), j) for j in range(len(hubs)) if i != j]
+            dists.sort()
+            if dists and dists[0][0] < LARSON_MAX_DEG:
+                j_near = dists[0][1]
+                pair_key = tuple(sorted([i, j_near]))
+                if pair_key not in connected_pairs:
+                    connected_pairs.add(pair_key)
+                    h2 = hubs[j_near]
+                    corridors.append({"h1": h1, "h2": h2})
+
+    return {"hubs": hubs, "refuges": refuges, "corridors": corridors, "computed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
+
+
+# Build the national evidence point list (as simple tuples for efficient caching) from
+# EVERY processed sighting, not just local ones
+national_evidence_points = tuple(
+    (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)), float(s.get("esi_score", 0.5)))
+    for s in all_sightings_processed if not filter_urban(float(s["latitude"]), float(s["longitude"]))
+)
+
+national_zones = compute_national_zones(
+    national_evidence_points,
+    st.session_state.param_hotzone_radius_mi,
+    st.session_state.param_report_gap_mi,
+    st.session_state.param_esi_threshold,
+    st.session_state.param_corridor_max_mi,
+) if show_hotspots else {"hubs": [], "refuges": [], "corridors": [], "computed_at": None}
+
+# DISPLAY filter: show whichever nationally-computed zones fall near the current view.
+# This is the piece that fixes the inconsistency -- the zones themselves never change
+# based on who's looking or from where; only which of the same fixed set gets drawn does.
+DISPLAY_BUFFER_MI = radius_miles + st.session_state.param_hotzone_radius_mi
+ground_truth_hubs = [h for h in national_zones["hubs"] if haversine_miles(lat, lon, h["lat"], h["lon"]) <= DISPLAY_BUFFER_MI]
+predictive_refuges = [r for r in national_zones["refuges"] if haversine_miles(lat, lon, r["lat"], r["lon"]) <= DISPLAY_BUFFER_MI]
+visible_corridors = [c for c in national_zones["corridors"] if haversine_miles(lat, lon, c["h1"]["lat"], c["h1"]["lon"]) <= DISPLAY_BUFFER_MI or haversine_miles(lat, lon, c["h2"]["lat"], c["h2"]["lon"]) <= DISPLAY_BUFFER_MI]
+zones_computed_at = national_zones["computed_at"]
+
+if show_hotspots:
+    for hub in ground_truth_hubs:
+        folium.Circle(radius=8000 + (hub['weight'] * 1500), location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
 
     for ref in predictive_refuges:
         ref_popup = (f"🪹 Predictive Refuge Zone<br>"
@@ -836,33 +897,27 @@ if show_hotspots and combined_evidence_points:
                      f"<small>High inferred habitat quality, no direct reports here — could mean it's genuinely quiet, or that reports simply aren't reaching outside databases (see the Larson/Kentucky case).</small>")
         folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup=ref_popup).add_to(m)
 
-    # Green Larson Hypothesis corridors: connect nearby hot zones as likely transit channels
-    # Capped at 20 miles between hubs (per field-calibrated real-world corridor length), straight-line
-    # geometric estimate for now — real terrain-following path-tracing needs land-cover/hydrology data.
-    LARSON_MAX_DEG = st.session_state.param_corridor_max_mi / 69.0
+    larson_corridor_count = len(visible_corridors)
+    for c in visible_corridors:
+        h1, h2 = c["h1"], c["h2"]
+        vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
+        perp = np.array([-vec[1], vec[0]]) / (np.linalg.norm(vec) + 1e-6) * 0.025
+        p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
+        p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
+        p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
+        p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
+        folium.Polygon(locations=[p1, p2, p3, p4], color="#27ae60", weight=1.5, fill=True, fill_color="#27ae60", fill_opacity=0.15, popup="🌲 The Larson Hypothesis: Transit Channel").add_to(m)
+else:
     larson_corridor_count = 0
-    if len(ground_truth_hubs) > 1:
-        connected_pairs = set()
-        for i in range(len(ground_truth_hubs)):
-            h1 = ground_truth_hubs[i]
-            dists = [(np.sqrt((h1["lat"] - ground_truth_hubs[j]["lat"]) ** 2 + (h1["lon"] - ground_truth_hubs[j]["lon"]) ** 2), j) for j in range(len(ground_truth_hubs)) if i != j]
-            dists.sort()
-            if dists and dists[0][0] < LARSON_MAX_DEG:
-                j_near = dists[0][1]
-                pair_key = tuple(sorted([i, j_near]))
-                if pair_key not in connected_pairs:
-                    connected_pairs.add(pair_key)
-                    h2 = ground_truth_hubs[j_near]
-                    vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
-                    perp = np.array([-vec[1], vec[0]]) / (np.linalg.norm(vec) + 1e-6) * 0.025
-                    p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
-                    p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
-                    p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
-                    p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
-                    folium.Polygon(locations=[p1, p2, p3, p4], color="#27ae60", weight=1.5, fill=True, fill_color="#27ae60", fill_opacity=0.15, popup="🌲 The Larson Hypothesis: Transit Channel").add_to(m)
-                    larson_corridor_count += 1
+
+# Real distance scale, since without the search-radius ring there was previously no way
+# to judge distance on the map at all
+folium.plugins.MeasureControl(position="bottomleft", primary_length_unit="miles").add_to(m)
 
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
+
+if zones_computed_at:
+    st.caption(f"🕒 National zones last calculated: {zones_computed_at} — recalculates automatically at most once every 24 hours, or immediately after any data update/redeploy.")
 
 # ==========================================
 # 6. INTEGRATED REGIONAL INTELLIGENCE DRAWER (the 4-tab "local intel" drawer)
