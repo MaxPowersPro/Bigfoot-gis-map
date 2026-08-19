@@ -15,9 +15,6 @@ import json
 import urllib.parse
 from data.data_loader import load_and_standardize_dataset
 
-# ==========================================
-# 1. PAGE SETUP & AUTO-LOCATION INIT
-# ==========================================
 st.set_page_config(
     page_title="Bigfoot Field Analysis Platform",
     page_icon="👣",
@@ -25,14 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Load master bundled datasets from /data directory
 def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
-    """Loads the official BFRO KMZ-derived dataset (replaces the old corrupted
-    bfro_reports.csv entirely). Built as its own dedicated loader rather than
-    reusing the generic BFRO-tuned loader, since that loader assumes a 'number'
-    column for report IDs (this file has 'report_id') and only exposes a few
-    fields at the top level -- reusing it would have silently broken the direct
-    BFRO report links."""
     import pandas as pd
     import os
     if not os.path.exists(path):
@@ -66,10 +56,6 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
 raw_sightings_bfro = load_bfro_clean_data()
 
 def load_junk_drawer_data(path="data/junk_drawer.csv"):
-    """Loads the Junk Drawer data directly - NOT through the generic loader, since that
-    one requires latitude/longitude columns and silently returns nothing without them.
-    Junk Drawer entries aren't tied to a location at all, which is exactly what caused
-    the 'file not found or empty' bug even though the file was correctly named."""
     import pandas as pd
     import os
     if not os.path.exists(path):
@@ -84,9 +70,6 @@ def load_junk_drawer_data(path="data/junk_drawer.csv"):
     return df.to_dict("records")
 
 def load_researcher_archives_data(path="data/researcher_archives.csv"):
-    """Loads the Researcher Archives reference file - same pattern as the Junk Drawer
-    loader, since this data isn't tied to a location either and the generic loader
-    would silently return nothing for it."""
     import pandas as pd
     import os
     if not os.path.exists(path):
@@ -101,10 +84,6 @@ def load_researcher_archives_data(path="data/researcher_archives.csv"):
     return df.to_dict("records")
 
 def load_john_green_data(path="data/john_green_incidents_clean.csv"):
-    """Loads John Green's historical sasquatch database (public domain), building
-    sighting records from its real columns rather than forcing it through the
-    BFRO-tuned generic loader. Every record is tagged source='John Green Historical
-    Archive' so it never gets silently blended with/mistaken for BFRO data."""
     import pandas as pd
     import os
     if not os.path.exists(path):
@@ -113,11 +92,6 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
         df = pd.read_csv(path)
     except Exception:
         try:
-            # A single malformed row (stray comma/quote in the free-text narrative or
-            # citation fields) can make the strict parser fail the WHOLE file silently,
-            # returning zero sightings with no visible error. Same class of bug already
-            # found and fixed in the research scripts -- this fallback carries that same
-            # fix into the live app.
             df = pd.read_csv(path, engine="python", on_bad_lines="skip")
         except Exception:
             return []
@@ -155,14 +129,13 @@ raw_sightings_john_green = load_john_green_data()
 raw_sightings = raw_sightings_bfro + raw_sightings_john_green
 raw_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
 raw_news = load_and_standardize_dataset("data/press_archives.csv")
-raw_camps = load_and_standardize_dataset("data/campsites.csv")  # optional - app runs fine if this file doesn't exist yet
-raw_junk = load_junk_drawer_data()  # optional - app runs fine if this file doesn't exist yet
+raw_camps = load_and_standardize_dataset("data/campsites.csv")
+raw_junk = load_junk_drawer_data()
 all_junk_records = raw_junk
 
-raw_researcher_archives = load_researcher_archives_data()  # optional - app runs fine if this file doesn't exist yet
+raw_researcher_archives = load_researcher_archives_data()
 KRANTZ_PDF_URL = "https://raw.githubusercontent.com/MaxPowersPro/Bigfoot-gis-map/main/data/krantz_finding_aid.pdf"
 
-# Check visitor browser location on first load
 if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
     device_loc = get_geolocation()
     if device_loc and "coords" in device_loc:
@@ -185,9 +158,6 @@ loc_name = str(st.session_state.location_name)
 active_state = str(st.session_state.user_state)
 active_county = str(st.session_state.user_county)
 
-# ==========================================
-# BRANDING HEADER BANNER
-# ==========================================
 try:
     st.image("image.png", use_container_width=True)
 except Exception:
@@ -198,9 +168,6 @@ except Exception:
 
 st.caption("Site-Specific Spatial Map & Predictive Multi-Criteria Analysis Engine")
 
-# ==========================================
-# TOP COLLAPSED APP NAVIGATION & KEY GUIDE
-# ==========================================
 with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", expanded=False):
     st.markdown("### 🎓 App Navigation & Field Controls")
     col_g1, col_g2, col_g3 = st.columns(3)
@@ -229,9 +196,6 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
         """)
     st.markdown("---")
 
-# ==========================================
-# 2. SUPABASE CONNECTION & UTILITIES
-# ==========================================
 @st.cache_resource
 def init_supabase():
     try:
@@ -282,49 +246,14 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     return R * c
 
-# ---- Infrasound source classification (4 real categories, used by Local Intel + Research Library) ----
 INFRASOUND_TYPES = {
-    "waterfall": {
-        "label": "🌊 Waterfall / Hydrological",
-        "cause": "High-volume water impact at waterfalls, rapids, or river spillways.",
-        "freq_range": "3 – 15 Hz",
-        "character": "Continuous rumble.",
-        "felt_miles": 12,
-        "travel_miles": 80,
-        "effect": "Falls mostly in the vestibular resonance band (1-7 Hz) — dizziness, pressure headaches, and loss of balance are the most commonly reported effects within the felt zone."
-    },
-    "wind": {
-        "label": "🌬️ Wind / Mountain Pass",
-        "cause": "High-velocity wind funneling through narrow ridge gaps, saddles, or mountain passes.",
-        "freq_range": "0.5 – 5 Hz",
-        "character": "Continuous, weather- and pressure-system dependent.",
-        "felt_miles": 8,
-        "travel_miles": 55,
-        "effect": "Sits at the low end of the vestibular band — dizziness and disorientation are most likely, especially during active frontal weather passing through the notch."
-    },
-    "manmade": {
-        "label": "⚙️ Man-Made (Dam / Mine)",
-        "cause": "Dam spillway turbulence (continuous hum) or mine/quarry blasting (short, high-amplitude pulses).",
-        "freq_range": "0.5 – 15 Hz",
-        "character": "Dams: steady hum. Mines/quarries: sharp, punctuated blast pulses, documented detectable 10+ miles out.",
-        "felt_miles": 8,
-        "travel_miles": 60,
-        "effect": "Mine blasts can produce a sudden felt pressure jolt rather than a gradual sensation; dam hum tends to produce the same dizziness/dread pattern as natural hydrological sources."
-    },
-    "biological": {
-        "label": "🦍 Biological",
-        "cause": "Large thoracic resonance structures and specialized laryngeal folds in large-bodied animals producing sub-audible vocal bursts.",
-        "freq_range": "8 – 18 Hz",
-        "character": "Vocal burst, not continuous.",
-        "felt_miles": 3,
-        "travel_miles": 8,
-        "effect": "Overlaps the human alpha-wave / 'being watched' band (7-12 Hz) most directly, but the felt zone is small since source amplitude is far below geological or man-made sources."
-    },
+    "waterfall": {"label": "🌊 Waterfall / Hydrological", "cause": "High-volume water impact at waterfalls, rapids, or river spillways.", "freq_range": "3 – 15 Hz", "character": "Continuous rumble.", "felt_miles": 12, "travel_miles": 80, "effect": "Falls mostly in the vestibular resonance band (1-7 Hz) — dizziness, pressure headaches, and loss of balance are the most commonly reported effects within the felt zone."},
+    "wind": {"label": "🌬️ Wind / Mountain Pass", "cause": "High-velocity wind funneling through narrow ridge gaps, saddles, or mountain passes.", "freq_range": "0.5 – 5 Hz", "character": "Continuous, weather- and pressure-system dependent.", "felt_miles": 8, "travel_miles": 55, "effect": "Sits at the low end of the vestibular band — dizziness and disorientation are most likely, especially during active frontal weather passing through the notch."},
+    "manmade": {"label": "⚙️ Man-Made (Dam / Mine)", "cause": "Dam spillway turbulence (continuous hum) or mine/quarry blasting (short, high-amplitude pulses).", "freq_range": "0.5 – 15 Hz", "character": "Dams: steady hum. Mines/quarries: sharp, punctuated blast pulses, documented detectable 10+ miles out.", "felt_miles": 8, "travel_miles": 60, "effect": "Mine blasts can produce a sudden felt pressure jolt rather than a gradual sensation; dam hum tends to produce the same dizziness/dread pattern as natural hydrological sources."},
+    "biological": {"label": "🦍 Biological", "cause": "Large thoracic resonance structures and specialized laryngeal folds in large-bodied animals producing sub-audible vocal bursts.", "freq_range": "8 – 18 Hz", "character": "Vocal burst, not continuous.", "felt_miles": 3, "travel_miles": 8, "effect": "Overlaps the human alpha-wave / 'being watched' band (7-12 Hz) most directly, but the felt zone is small since source amplitude is far below geological or man-made sources."},
 }
 
 def classify_infrasound_type(event_type_str):
-    """Returns one of 'waterfall' / 'wind' / 'manmade' / 'biological', or None if the source
-    doesn't match a known category — we show it as unclassified rather than guessing."""
     s = str(event_type_str).lower()
     if any(k in s for k in ["waterfall", "falls", "rapid", "hydro", "niagara", "snoqualmie"]):
         return "waterfall"
@@ -336,7 +265,6 @@ def classify_infrasound_type(event_type_str):
         return "biological"
     return None
 
-# ---- Evidence Pattern Scanner: keyword-based behavior detection across sightings ----
 EVIDENCE_CATEGORIES = {
     "Tracks / Footprints": ["track", "footprint", "print", "cast"],
     "Vocalizations": ["whoop", "howl", "scream", "whistle", "vocal", "holler", "yell", "call"],
@@ -346,9 +274,6 @@ EVIDENCE_CATEGORIES = {
 }
 
 def scan_evidence_patterns(sightings):
-    """Scans each sighting's title+summary for known evidence/behavior keywords.
-    Returns {category: [{report, season}, ...]} -- pure text matching, no claim about
-    what actually happened, just what the report text mentions."""
     results = {cat: [] for cat in EVIDENCE_CATEGORIES}
     for s in sightings:
         text = f"{s.get('title', '')} {s.get('summary', '')}".lower()
@@ -358,14 +283,6 @@ def scan_evidence_patterns(sightings):
                 results[category].append({"report": s, "season": season})
     return results
 
-# ---- Paranormal/high-strangeness content indicator ----
-# Deliberately content-based, not source-based: an earlier version of this app used
-# Class C (secondhand sourcing) as a stand-in for "anomalous," which conflates two
-# different things -- how reliably a report was sourced isn't the same as whether its
-# content includes high-strangeness elements. A rock-solid Class A report can include
-# a UFO; a Class C report can be perfectly mundane. This scans the actual text instead.
-# Categories drawn from "Where the Footprints End" (Cutchin & Renner) -- documented
-# recurring high-strangeness elements in Bigfoot literature.
 PARANORMAL_KEYWORDS = [
     "ufo", "mystery light", "orb", "telepath", "mind-speak", "mindspeak", "mind speak",
     "vanished", "disappeared without", "teleport", "portal", "shapeshift", "shape-shift",
@@ -373,16 +290,10 @@ PARANORMAL_KEYWORDS = [
 ]
 
 def scan_paranormal_content(text: str) -> bool:
-    """Returns True if the report's own text mentions a documented high-strangeness
-    category -- a content-based flag, never a claim that anything paranormal actually
-    happened. Purely descriptive of what the report says."""
     low = text.lower()
     return any(kw in low for kw in PARANORMAL_KEYWORDS)
 
-# ---- Black-bear-census-style weighting formulas (kept from the current live app) ----
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
-    """Models how much a location's report count is inflated/suppressed by human access & population,
-    the same way bear census work corrects raw sighting counts for observer bias."""
     safe_dist = max(0.01, dist_to_road_miles)
     pop_scalar = max(0.1, pop_density_sq_mi / 50.0)
     proximity_friction = 1.0 / (safe_dist + 0.1)
@@ -398,13 +309,10 @@ def calculate_adjusted_evidence_weight(report_class: str, has_physical_evidence:
         base_weight = 0.8
     else:
         base_weight = 0.3
-
     if lore_boost:
         base_weight += 0.25
-
     adjusted_weight = base_weight / (1.0 + (k * effort_factor))
     final_weight = max(0.1, min(4.0, adjusted_weight))
-
     return {
         "base_weight": base_weight,
         "effort_factor": effort_factor,
@@ -431,35 +339,27 @@ def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, com
     wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
     ET.SubElement(wpt_target, "name").text = f"TARGET: {loc_title}"
     ET.SubElement(wpt_target, "sym").text = "Cross-Hair"
-
     for s in sightings:
         wpt = ET.SubElement(gpx, "wpt", lat=str(s.get("latitude")), lon=str(s.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Sighting: {s.get('title', 'BFRO Report')}"
         ET.SubElement(wpt, "desc").text = f"Date: {s.get('event_date', 'N/A')} | Summary: {s.get('summary', '')}"
         ET.SubElement(wpt, "sym").text = "Footprint"
-
     for c in camps:
         wpt = ET.SubElement(gpx, "wpt", lat=str(c.get("latitude")), lon=str(c.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Camp: {c.get('name', 'Campsite')}"
         ET.SubElement(wpt, "sym").text = "Campground"
-
     for a in audio:
         wpt = ET.SubElement(gpx, "wpt", lat=str(a.get("latitude")), lon=str(a.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Audio: {a.get('event_type', 'Infrasound Log')}"
         ET.SubElement(wpt, "desc").text = a.get('notes', '')
         ET.SubElement(wpt, "sym").text = "Sound"
-
     for log in community_logs:
         wpt = ET.SubElement(gpx, "wpt", lat=str(log.get("latitude")), lon=str(log.get("longitude")))
         ET.SubElement(wpt, "name").text = f"Field Log: {log.get('observation_type', 'Unvetted Log')}"
         ET.SubElement(wpt, "desc").text = f"Facts: {log.get('physical_evidence_notes', '')} | Narrative: {log.get('field_narrative', '')}"
         ET.SubElement(wpt, "sym").text = "Pin"
-
     return ET.tostring(gpx, encoding="utf-8", method="xml")
 
-# ==========================================
-# 3. SIDEBAR CONTROLS & GEOCODING
-# ==========================================
 def geocode_mapbox(query):
     token = st.secrets.get("MAPBOX_TOKEN", "")
     if not token:
@@ -484,9 +384,46 @@ with st.sidebar:
     st.header("⚙️ Field Controls")
     if not st.secrets.get("MAPBOX_TOKEN", ""):
         st.caption("⚠️ No MAPBOX_TOKEN set in Secrets — area search won't work until this is added. Device GPS still works.")
+
     loc_search = st.text_input("📍 Target Search Area", value=loc_name)
-    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2)
+    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2, key="radius_miles_key")
     deg_delta = radius_miles / 69.0
+
+    with st.expander("💾 Saved Searches"):
+        st.caption("Save this exact location, radius, and layer setup to a file on your device — or load one back.")
+        import json as _json
+        current_layers = {
+            "layer_bfro": st.session_state.get("layer_bfro", True),
+            "layer_lore": st.session_state.get("layer_lore", True),
+            "layer_news": st.session_state.get("layer_news", True),
+            "layer_hotspots": st.session_state.get("layer_hotspots", True),
+            "layer_audio": st.session_state.get("layer_audio", True),
+            "layer_user_logs": st.session_state.get("layer_user_logs", True),
+            "layer_camps": st.session_state.get("layer_camps", True),
+        }
+        save_search_payload = {"location_name": loc_name, "lat": lat, "lon": lon, "radius_miles": radius_miles, "layers": current_layers}
+        st.download_button(
+            "Save This Search",
+            data=_json.dumps(save_search_payload, indent=2),
+            file_name=f"saved_search_{loc_name.replace(' ', '_').replace(',', '')[:30]}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+        st.markdown("---")
+        loaded_file = st.file_uploader("Load a saved search file (.json)", type=["json"], key="load_search_uploader")
+        if loaded_file is not None and st.button("Jump to this saved search", use_container_width=True):
+            try:
+                saved = _json.loads(loaded_file.read())
+                st.session_state.user_lat = saved["lat"]
+                st.session_state.user_lon = saved["lon"]
+                st.session_state.location_name = saved.get("location_name", "Loaded Search")
+                st.session_state.radius_miles_key = saved.get("radius_miles", 100)
+                for layer_key, layer_val in saved.get("layers", {}).items():
+                    st.session_state[layer_key] = layer_val
+                st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Couldn't read that file: {e}")
 
     col_s1, col_s2 = st.columns(2)
     if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
@@ -507,38 +444,28 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
-    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True)
-    show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True)
-    show_news = st.checkbox("3. 📰 Press Archives Net", value=True)
-    show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True)
-    show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True)
-    show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True)
-    show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
+    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True, key="layer_bfro")
+    show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True, key="layer_lore")
+    show_news = st.checkbox("3. 📰 Press Archives Net", value=True, key="layer_news")
+    show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True, key="layer_hotspots")
+    show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True, key="layer_audio")
+    show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True, key="layer_user_logs")
+    show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True, key="layer_camps")
 
-# ==========================================
-# ADJUSTABLE MODEL ASSUMPTIONS — set defaults once; the Math & Science Drawer below the
-# map lets a user change these live. Streamlit reruns top-to-bottom on every interaction,
-# so reading from session_state here (before these values are used) means a slider defined
-# much further down the page still correctly drives everything computed above it.
-# ==========================================
 PARAM_DEFAULTS = {
-    "param_hotzone_radius_mi": 15.0,   # Hot Zone clustering bandwidth
-    "param_report_gap_mi": 10.0,       # min distance from a direct report to flag a Predictive Refuge
-    "param_esi_threshold": 0.55,       # min ESI proxy score to flag a Predictive Refuge
-    "param_corridor_max_mi": 20.0,     # max distance between Hot Zones to draw a Larson corridor
-    "param_effort_k": 0.5,             # strength of the human-access down-weighting in the effort formula
+    "param_hotzone_radius_mi": 15.0,
+    "param_report_gap_mi": 10.0,
+    "param_esi_threshold": 0.55,
+    "param_corridor_max_mi": 20.0,
+    "param_effort_k": 0.5,
 }
 for _pk, _pv in PARAM_DEFAULTS.items():
     if _pk not in st.session_state:
         st.session_state[_pk] = _pv
 
-# ==========================================
-# 4. UNIFIED DATA PROCESSING & FILTERING
-# ==========================================
 sightings_data, camps_data, audio_data, media_data, lore_data, user_logs_data = [], [], [], [], [], []
 seasonal_breakdown = {}
 
-# Process Local Sightings
 if raw_sightings:
     for s in raw_sightings:
         s_lat, s_lon = s.get("latitude"), s.get("longitude")
@@ -571,18 +498,9 @@ if raw_sightings:
                 s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
                 sightings_data.append(s)
 
-# Full, unfiltered datasets for the Research Library -- genuinely nationwide, not
-# accidentally scoped to whatever's near the current search location. This was a real
-# bug: the Research Library used to search the already-locally-filtered lore_data/
-# media_data instead of everything.
 all_lore_records = [item.get("metadata", item) for item in raw_lore] if raw_lore else []
 all_press_records = [item.get("metadata", item) for item in raw_news] if raw_news else []
 
-# Process Local Lore -- each entity has its own real relevance_radius_miles reflecting
-# how localized vs. broadly regional that specific tradition actually is (a single
-# named rock vs. a whole coastal nation's territory), rather than one generic multiplier
-# for everything. Replaces the old state-name-substring fallback entirely, which is what
-# caused the stale-Massachusetts-default bug -- clean distance-only matching now.
 if raw_lore:
     for item in raw_lore:
         record = item.get("metadata", item)
@@ -592,7 +510,6 @@ if raw_lore:
         if haversine_miles(lat, lon, l_lat, l_lon) <= entry_radius:
             lore_data.append(record)
 
-# Process Local Press Archives -- same real-relevance-radius approach, no state fallback.
 if raw_news:
     for item in raw_news:
         record = item.get("metadata", item)
@@ -602,7 +519,6 @@ if raw_news:
         if haversine_miles(lat, lon, m_lat, m_lon) <= entry_radius:
             media_data.append(record)
 
-# Process Local Campsites
 if raw_camps:
     for item in raw_camps:
         record = item.get("metadata", item)
@@ -611,7 +527,6 @@ if raw_camps:
         if haversine_miles(lat, lon, c_lat, c_lon) <= radius_miles:
             camps_data.append(record)
 
-# Additive Supabase Layers (acoustic reports & community field logs stay live in Supabase)
 if supabase:
     try:
         r = supabase.table("acoustic_reports").select("*").execute()
@@ -643,10 +558,6 @@ if supabase:
     except Exception:
         pass
 
-# Debunking cross-reference: flag sightings that fall within a known infrasound source's felt zone.
-# This is informational only — it never touches evidence_weight or the ESI math. It exists so a
-# researcher can see "a natural physiological explanation is plausible here" before leaning esoteric,
-# the same role the fauna misidentification tab plays for sounds/sightings.
 for s in sightings_data:
     s["nearby_infrasound"] = None
     for a in audio_data:
@@ -657,9 +568,6 @@ for s in sightings_data:
             break
     s["is_anomalous"] = scan_paranormal_content(f"{s.get('title', '')} {s.get('summary', '')}")
 
-# ==========================================
-# 5. MAP BANNER & FOLIUM MAP RENDERER
-# ==========================================
 st.markdown(f"""
 <div style="background-color:#1e272c; color:white; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:14px; border-left:4px solid #e74c3c;">
 <b>📍 Active Sector Records ({loc_name} • {active_state}):</b> &nbsp;
@@ -675,7 +583,6 @@ m = folium.Map(location=[lat, lon], zoom_start=8, tiles="https://{s}.tile.opento
 folium.Circle(radius=radius_miles * 1609.34, location=[lat, lon], color="#e74c3c", weight=2, fill=True, fill_opacity=0.02).add_to(m)
 folium.Marker([lat, lon], popup=f"<b>📍 TARGET CENTER: {loc_name}</b>", icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
 
-# Sightings Layer
 if show_bfro and sightings_data:
     for s in sightings_data:
         j_lat, j_lon = apply_jitter(s["latitude"], s["longitude"], offset_seed=1)
@@ -712,20 +619,14 @@ if show_bfro and sightings_data:
         {link_html}
         </div>
         """
-        # Real colorable SVG footprint, not an emoji -- purple = content-flagged as
-        # containing high-strangeness language, blue = standard biological sighting.
-        # Dots were the old marker shape; kept available for other future layers per
-        # Max's request, footprints are now reserved for sightings specifically.
         footprint_svg = f"""<svg width="18" height="18" viewBox="0 0 24 24" style="filter: drop-shadow(0 0 1px white);"><ellipse cx="12" cy="15" rx="4.2" ry="8.5" fill="{pin_color}"/><ellipse cx="7.5" cy="5" rx="1.3" ry="2.1" fill="{pin_color}"/><ellipse cx="10.5" cy="3.2" rx="1.4" ry="2.3" fill="{pin_color}"/><ellipse cx="13.7" cy="3.5" rx="1.3" ry="2.2" fill="{pin_color}"/><ellipse cx="16.5" cy="5" rx="1.2" ry="1.9" fill="{pin_color}"/><ellipse cx="18.7" cy="7.5" rx="1.0" ry="1.5" fill="{pin_color}"/></svg>"""
         folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=280), icon=folium.DivIcon(html=footprint_svg, icon_size=(20, 20), icon_anchor=(10, 16))).add_to(m)
 
-# Campsites Layer
 if show_camps and camps_data:
     for c in camps_data:
         c_popup = f"<b>🏕️ {c.get('name', 'Campsite')}</b><br><small>Type: {c.get('type', 'Primitive / Dispersed')}</small>"
         folium.Marker([c["latitude"], c["longitude"]], popup=c_popup, icon=folium.Icon(color="green", icon="campground", prefix="fa")).add_to(m)
 
-# RESTORED: Infrasound / Acoustic Layer — single purple glance-and-go icon; details live in Local Intel below
 if show_audio and audio_data:
     for a in audio_data:
         type_label = INFRASOUND_TYPES.get(a.get("infrasound_type"), {}).get("label", "❔ Unclassified Source")
@@ -735,19 +636,15 @@ if show_audio and audio_data:
         a_popup = f"""<b>🔊 {type_label}</b><br><b>{a.get('event_type')}</b><br><small>Felt zone: ~{a.get('felt_radius_miles', 8)} mi | Detectable to: ~{a['prop_radius_miles']} mi</small>{off_str}<br><p style='font-size:10px; margin-top:4px;'>See Local Intel drawer below for full details.</p>"""
         if not a.get("is_offscreen"):
             folium.Marker([a["latitude"], a["longitude"]], popup=a_popup, icon=folium.Icon(color="purple", icon="volume-up", prefix="fa")).add_to(m)
-        # Lighter outer ring: full detectable/travel distance
         folium.Circle(radius=travel_m, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1, dash_array="4, 6", fill=True, fill_color="#8e44ad", fill_opacity=0.04, popup=f"Detectable footprint (~{a['prop_radius_miles']} mi)").add_to(m)
-        # Bold inner ring: where it can actually be felt
         folium.Circle(radius=felt_m, location=[a["latitude"], a["longitude"]], color="#6c3483", weight=2, fill=True, fill_color="#8e44ad", fill_opacity=0.16, popup=f"Felt zone (~{a.get('felt_radius_miles', 8)} mi)").add_to(m)
 
-# RESTORED: Community Field Logs Layer (also toggled by sidebar but wasn't actually drawn)
 if show_user_logs and user_logs_data:
     for ulog in user_logs_data:
         has_facts = bool(ulog.get('physical_evidence_notes'))
         log_popup = f"<b>📝 FIELD LOG</b><br><small>Type: {ulog.get('observation_type')}</small><br><p style='font-size:10px;'>{ulog.get('physical_evidence_notes') or ulog.get('field_narrative', '')}</p>"
         folium.Marker([ulog["latitude"], ulog["longitude"]], popup=log_popup, icon=folium.Icon(color="green" if has_facts else "orange", icon="clipboard", prefix="fa")).add_to(m)
 
-# RESTORED: Hot Zones, Predictive Refuges & The Larson Hypothesis corridors
 ground_truth_hubs, predictive_refuges = [], []
 combined_evidence_points = [
     {"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0)), "esi": float(s.get("esi_score", 0.5))}
@@ -761,7 +658,6 @@ if show_hotspots and combined_evidence_points:
     visited = set()
     RADIUS_DEG = st.session_state.param_hotzone_radius_mi / 69.0
 
-    # Red Hot Zones: weighted density hubs (sightings + implicit press/lore boost via evidence_weight)
     for i, pt in enumerate(coords_arr):
         if i in visited: continue
         neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
@@ -777,17 +673,11 @@ if show_hotspots and combined_evidence_points:
     for hub in ground_truth_hubs:
         folium.Circle(radius=8000 + (hub['weight'] * 1500), location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
 
-    # Orange Predictive Refuges: grid-scanned for pockets with high inferred habitat suitability
-    # (ESI proxy from nearby reports) but near-zero direct sightings — matches Matt Larson's KY case,
-    # where the true habitat may be the *quiet* pocket surrounded by report activity, not just "far from everything."
-    # HONEST LIMITATION: we don't yet have real per-point terrain/hydrology data (that's a data-farming task),
-    # so the ESI proxy here is inverse-distance-weighted from nearby *known* reports' esi_score, not a true
-    # independent terrain calculation. Popups say so explicitly.
     predictive_refuges = []
     REPORT_GAP_DEG = st.session_state.param_report_gap_mi / 69.0
-    ESI_PROXY_RADIUS_DEG = 0.6  # ~41 miles — how far we'll look for nearby reports to infer local habitat quality
+    ESI_PROXY_RADIUS_DEG = 0.6
     ESI_THRESHOLD = st.session_state.param_esi_threshold
-    MIN_REFUGE_SEPARATION_DEG = 0.15  # ~10 miles apart, so we don't cluster near-duplicate refuge circles
+    MIN_REFUGE_SEPARATION_DEG = 0.15
 
     if len(combined_evidence_points) >= 3:
         esi_arr = np.array([pt["esi"] for pt in combined_evidence_points])
@@ -806,18 +696,15 @@ if show_hotspots and combined_evidence_points:
                 dists_deg = np.sqrt((coords_arr[:, 0] - g_lat) ** 2 + (coords_arr[:, 1] - g_lon) ** 2)
                 nearest_report_deg = float(np.min(dists_deg))
                 if nearest_report_deg < REPORT_GAP_DEG:
-                    continue  # too close to an actual report — not a "quiet pocket"
-
+                    continue
                 in_radius = dists_deg <= ESI_PROXY_RADIUS_DEG
                 if not np.any(in_radius):
-                    continue  # no nearby data to infer habitat quality from at all
-
+                    continue
                 idw_weights = 1.0 / (dists_deg[in_radius] + 0.02) ** 2
                 esi_proxy = float(np.sum(idw_weights * esi_arr[in_radius]) / np.sum(idw_weights))
                 if esi_proxy >= ESI_THRESHOLD:
                     candidates.append({"lat": g_lat, "lon": g_lon, "esi_proxy": esi_proxy, "gap_miles": nearest_report_deg * 69.0})
 
-        # Keep only the strongest, well-separated candidates (avoid a wall of overlapping circles)
         candidates.sort(key=lambda c: c["esi_proxy"], reverse=True)
         for cand in candidates:
             too_close = any(
@@ -836,9 +723,6 @@ if show_hotspots and combined_evidence_points:
                      f"<small>High inferred habitat quality, no direct reports here — could mean it's genuinely quiet, or that reports simply aren't reaching outside databases (see the Larson/Kentucky case).</small>")
         folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup=ref_popup).add_to(m)
 
-    # Green Larson Hypothesis corridors: connect nearby hot zones as likely transit channels
-    # Capped at 20 miles between hubs (per field-calibrated real-world corridor length), straight-line
-    # geometric estimate for now — real terrain-following path-tracing needs land-cover/hydrology data.
     LARSON_MAX_DEG = st.session_state.param_corridor_max_mi / 69.0
     larson_corridor_count = 0
     if len(ground_truth_hubs) > 1:
@@ -864,9 +748,6 @@ if show_hotspots and combined_evidence_points:
 
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
-# ==========================================
-# 6. INTEGRATED REGIONAL INTELLIGENCE DRAWER (the 4-tab "local intel" drawer)
-# ==========================================
 st.markdown("---")
 with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc_name} ({active_state})", expanded=True):
     panel_tab1, panel_tab2, panel_tab3, panel_tab4 = st.tabs([
@@ -995,8 +876,14 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
                     title = item.get('title', item.get('headline', 'Archive'))
                     p_date = item.get('pub_date', item.get('event_date', 'Historical'))
                     text = item.get('full_text_transcript', item.get('summary', ''))
+                    ref = item.get('article_url')
                     st.write(f"**{title} ({p_date})**")
                     st.caption(text[:150] + "..." if len(text) > 150 else text)
+                    if len(text) > 150:
+                        with st.expander("Read full article"):
+                            st.write(text)
+                            if ref:
+                                st.markdown(f"[Source]({ref})")
             else:
                 st.info(f"No press accounts indexed for {active_state}.")
         with c_season:
@@ -1007,10 +894,6 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
             else:
                 st.info("No dated reports in this sector yet.")
 
-# ==========================================
-# DRAWER: MATH & SCIENCE DRAWER (advanced — collapsed by default, doesn't compete for tab
-# space with the field-use Local Intel tabs on a small screen)
-# ==========================================
 with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
     st.caption("Every formula this app uses, why we're using it, and how it was calibrated. Science-based critique on their efficacy is welcome and will be considered.")
 
@@ -1151,118 +1034,8 @@ with st.expander("🔬 Math & Science Drawer (Advanced)", expanded=False):
                 except Exception as e:
                     st.error(f"Couldn't read that file: {e}")
 
-        st.caption("Saving or sharing a search area (not just these model settings) is on the list for later — not part of this drawer yet.")
+        st.caption("Search areas are now saveable/shareable via the Saved Searches section in the sidebar.")
 
-# ==========================================
-# DRAWER: NATIONAL ZONE CONSISTENCY PROOF (Experimental)
-# Completely isolated from the live map — no folium, no map rendering, plain Streamlit
-# only. This exists to safely prove out the "compute zones once, nationally" idea before
-# the map itself ever touches it again, after the last attempt broke the map with no
-# visible error. If anything here fails, the map above is completely unaffected, since
-# this code runs after the map has already fully rendered.
-# ==========================================
-with st.expander("🧪 National Zone Consistency Proof (Experimental)", expanded=False):
-    st.caption("Proves whether two nearby points would see the SAME Hot Zones/Refuges — the actual thing being fixed — without touching the live map at all. Safe to experiment with.")
-
-    @st.cache_data(ttl=86400, show_spinner=True)
-    def proof_weight_all_sightings(all_sightings, effort_k):
-        processed = []
-        for s in all_sightings:
-            s = dict(s)
-            s_lat, s_lon = s.get("latitude"), s.get("longitude")
-            if s_lat is None or s_lon is None:
-                continue
-            event_d_str = s.get('event_date', 'N/A')
-            try: ev_month = int(str(event_d_str).split('-')[1])
-            except Exception: ev_month = 6
-            s_dist_road = float(s.get("dist_to_road_miles", 0.4))
-            s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
-            eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
-            has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
-            class_rat = s.get("class_rating", "Class A")
-            weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=effort_k)
-            sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
-            terrain_input = s["real_terrain_roughness"] if s.get("real_terrain_roughness") is not None else 0.6
-            s["evidence_weight"] = weight_dict["final_weight"]
-            s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
-            processed.append(s)
-        return processed
-
-    @st.cache_data(ttl=86400, show_spinner=True)
-    def proof_compute_national_hubs(evidence_points, hotzone_radius_mi):
-        import datetime
-        if not evidence_points:
-            return {"hubs": [], "computed_at": None}
-        coords_arr = np.array([[p[0], p[1]] for p in evidence_points])
-        weights_arr = np.array([p[2] for p in evidence_points])
-        RADIUS_DEG = hotzone_radius_mi / 69.0
-        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
-        visited = set()
-        hubs = []
-        for i, pt in enumerate(coords_arr):
-            if i in visited: continue
-            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
-            if len(neighbors) >= 1:
-                hubs.append({
-                    "lat": float(np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])),
-                    "lon": float(np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])),
-                    "weight": float(np.sum(weights_arr[neighbors])), "count": int(len(neighbors)),
-                })
-                visited.update(neighbors)
-        return {"hubs": hubs, "computed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
-
-    if st.button("Run the national computation", key="run_national_proof"):
-        try:
-            proof_weighted = proof_weight_all_sightings(tuple(raw_sightings), st.session_state.param_effort_k) if raw_sightings else []
-            proof_points = tuple(
-                (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)))
-                for s in proof_weighted if not filter_urban(float(s["latitude"]), float(s["longitude"]))
-            )
-            proof_result = proof_compute_national_hubs(proof_points, st.session_state.param_hotzone_radius_mi)
-            st.session_state["_proof_result"] = proof_result
-            st.success(f"Computed {len(proof_result['hubs'])} national Hot Zones from {len(proof_weighted)} sightings.")
-        except Exception as e:
-            st.error(f"Something failed in the isolated computation (map above is unaffected): {e}")
-
-    if "_proof_result" in st.session_state:
-        proof_result = st.session_state["_proof_result"]
-        st.caption(f"🕒 Last computed: {proof_result.get('computed_at', 'never')}")
-
-        st.markdown("#### Test two nearby points")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Point A**")
-            a_lat = st.number_input("Latitude A", value=37.505, format="%.4f", key="proof_a_lat")
-            a_lon = st.number_input("Longitude A", value=-83.095, format="%.4f", key="proof_a_lon")
-        with col2:
-            st.markdown("**Point B**")
-            b_lat = st.number_input("Latitude B", value=37.495, format="%.4f", key="proof_b_lat")
-            b_lon = st.number_input("Longitude B", value=-83.115, format="%.4f", key="proof_b_lon")
-
-        display_buffer = st.slider("Display buffer (miles)", 10, 200, 40, key="proof_buffer")
-
-        hubs_a = [h for h in proof_result["hubs"] if haversine_miles(a_lat, a_lon, h["lat"], h["lon"]) <= display_buffer]
-        hubs_b = [h for h in proof_result["hubs"] if haversine_miles(b_lat, b_lon, h["lat"], h["lon"]) <= display_buffer]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Point A sees", f"{len(hubs_a)} hub(s)")
-            for h in hubs_a:
-                st.caption(f"({h['lat']:.4f}, {h['lon']:.4f}) — weight {h['weight']:.1f}")
-        with col2:
-            st.metric("Point B sees", f"{len(hubs_b)} hub(s)")
-            for h in hubs_b:
-                st.caption(f"({h['lat']:.4f}, {h['lon']:.4f}) — weight {h['weight']:.1f}")
-
-        if hubs_a == hubs_b:
-            st.success("✅ Both points see the exact same zone data — the consistency fix works.")
-        else:
-            st.warning("Different results — worth a closer look before this ever touches the live map.")
-
-# ==========================================
-# DRAWER: EVIDENCE PATTERN SCANNER (advanced — collapsed, same "off to the side"
-# placement as the Math & Science Drawer so it doesn't compete for tab space)
-# ==========================================
 with st.expander("🔍 Evidence Pattern Scanner (Advanced)", expanded=False):
     st.caption(f"Scans every sighting in this sector ({loc_name}) for recurring behavioral evidence — pure keyword matching against report text, shown with a seasonal breakdown. Not a claim about what happened, just what gets mentioned and when.")
 
@@ -1292,9 +1065,6 @@ with st.expander("🔍 Evidence Pattern Scanner (Advanced)", expanded=False):
                     if count > 10:
                         st.caption(f"...and {count - 10} more.")
 
-# ==========================================
-# DRAWER: RESTORED CURATED RESEARCH LIBRARY (nationwide reference vault)
-# ==========================================
 with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine", expanded=False):
     st.caption("Nationwide ethnographic archives, historical media scans, comparative primate biology, and behavioral search toolsets.")
     lib_choice = st.radio(
@@ -1573,13 +1343,6 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
                     st.markdown(f"[📄 Open the real finding aid PDF]({KRANTZ_PDF_URL})")
                 st.markdown("---")
 
-# ==========================================
-# DRAWER: JUNK DRAWER — standalone, sitting beneath the Research Library, not nested
-# inside it. Misleading citations, misattributed entities, conspiracy theories, and
-# pseudoscience — acknowledged and explained, never endorsed. Every entry shows both a
-# quick bullet "nutshell" and the full engaging writeup, since not everyone reads the
-# same way.
-# ==========================================
 with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pseudoscience", expanded=False):
     st.caption("This is exactly why science stays skeptical of Bigfoot research — and exactly what a serious research tool needs to be honest about. Acknowledged and explained here, never endorsed.")
 
@@ -1601,8 +1364,14 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
             with st.expander("Full story"):
                 claimed = item.get('what_gets_claimed', '')
                 if claimed and "N/A" not in str(claimed):
-                    st.markdown(f"**What gets claimed:** {claimed}")
-                st.error(f"**Why it's wrong:** {item.get('why_its_wrong', '')}")
+                    st.markdown(f"**The phenomenon:** {claimed}")
+                st.error(f"**The science:** {item.get('why_its_wrong', '')}")
+                field_test = item.get('field_test', '')
+                if field_test and str(field_test) != "nan":
+                    if "None applicable" in str(field_test) or "Not applicable" in str(field_test):
+                        st.caption(f"🧪 **Field test:** {field_test}")
+                    else:
+                        st.success(f"**🧪 Field test:** {field_test}")
                 ref = item.get('reference_url')
                 if ref and str(ref) != "nan":
                     st.markdown(f"[Source]({ref})")
@@ -1619,9 +1388,6 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
                     render_junk_entry(item)
 
 
-# ==========================================
-# DRAWER: RESTORED INVESTIGATOR FIELD LOG SUBMISSION (was a stub with no actual form)
-# ==========================================
 with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
     if not supabase:
         st.info("Field log submission needs SUPABASE_URL / SUPABASE_KEY set in Secrets to save entries.")
@@ -1654,9 +1420,6 @@ with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)
                 except Exception as e:
                     st.error(f"Error saving log: {e}")
 
-# ==========================================
-# DRAWER: REGIONAL CAMPSITES & ACCESS POINTS
-# ==========================================
 with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Within {radius_miles} miles)", expanded=False):
     if camps_data:
         st.write(f"Found **{len(camps_data)}** campsites in active sector:")
@@ -1665,9 +1428,6 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
     else:
         st.info("No campsites indexed in active sector radius. Add `data/campsites.csv` to populate local campsites.")
 
-# ==========================================
-# DRAWER: OFFLINE EXPORT
-# ==========================================
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
