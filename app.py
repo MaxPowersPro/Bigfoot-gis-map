@@ -253,6 +253,58 @@ INFRASOUND_TYPES = {
     "biological": {"label": "🦍 Biological", "cause": "Large thoracic resonance structures and specialized laryngeal folds in large-bodied animals producing sub-audible vocal bursts.", "freq_range": "8 – 18 Hz", "character": "Vocal burst, not continuous.", "felt_miles": 3, "travel_miles": 8, "effect": "Overlaps the human alpha-wave / 'being watched' band (7-12 Hz) most directly, but the felt zone is small since source amplitude is far below geological or man-made sources."},
 }
 
+# --- Range-based biological infrasound sources ---
+# Unlike a dam or waterfall (one fixed point), these are species whose real,
+# documented range covers whole states/provinces. Each entry must clear two
+# bars before being added here: (1) real, documented/peer-reviewed infrasound
+# or near-infrasound production -- no exceptions; (2) a real range source
+# (not a boundary sketched by hand). See the citation on each entry.
+RANGE_BASED_BIOLOGICAL_SPECIES = {
+    "American Alligator": {
+        # Range source: USFWS Federal Register, "Endangered and Threatened
+        # Wildlife and Plants; Regulations Pertaining to the American
+        # Alligator" -- lists the real breeding range by state.
+        "states": {
+            "Texas", "Oklahoma", "Louisiana", "Arkansas", "Mississippi",
+            "Alabama", "Georgia", "Florida", "South Carolina", "North Carolina",
+        },
+        "frequency": "16–25 Hz",
+        "description": (
+            "Male American alligators produce infrasound (16-25 Hz) during "
+            "breeding-season bellows (roughly April-May); the sub-audible "
+            "component makes water on their backs visibly 'dance' in Faraday "
+            "wave patterns, felt from 50+ ft away. Documented by Kent Vliet "
+            "(Univ. of Florida)."
+        ),
+        "citation": "Range: USFWS Federal Register (2021). Frequency: Vliet, Univ. of Florida.",
+    },
+    "Ruffed Grouse": {
+        # Range source: Ruffed Grouse Society ("present now or recently in
+        # all Canadian provinces and 38 of 49 states"); this is a simplified
+        # state-level version of that real range description, not a precise
+        # per-county boundary.
+        "states": {
+            "Maine", "New Hampshire", "Vermont", "Massachusetts", "Connecticut",
+            "New York", "Pennsylvania", "New Jersey",
+            "Virginia", "West Virginia", "Ohio", "Maryland",
+            "North Carolina", "Tennessee", "Kentucky", "Georgia",
+            "Michigan", "Wisconsin", "Minnesota", "Illinois", "Indiana", "Iowa",
+            "South Dakota", "North Dakota",
+            "Montana", "Idaho", "Wyoming", "Utah", "Washington", "Oregon", "Alaska",
+        },
+        "frequency": "~45 Hz peak (partial true infrasound per Freeman 2012)",
+        "description": (
+            "Male ruffed grouse perform a wing-beat 'drumming' display during "
+            "breeding season, striking the air up to 50 times in ~10 seconds "
+            "fast enough to create a small sonic boom; often felt as much as "
+            "heard. Peak frequency (~45 Hz, Garcia et al. 2012) sits just "
+            "above the strict 20 Hz infrasound cutoff, but the display's "
+            "energy extends into true infrasound (Freeman 2012)."
+        ),
+        "citation": "Range: Ruffed Grouse Society. Frequency: Garcia et al. 2012; Freeman 2012.",
+    },
+}
+
 def classify_infrasound_type(event_type_str):
     s = str(event_type_str).lower()
     if any(k in s for k in ["waterfall", "falls", "rapid", "hydro", "niagara", "snoqualmie"]):
@@ -392,6 +444,7 @@ with st.sidebar:
     with st.expander("💾 Saved Searches"):
         st.caption("Save this exact location, radius, and layer setup to a file on your device — or load one back.")
         import json as _json
+        import re as _re
         current_layers = {
             "layer_bfro": st.session_state.get("layer_bfro", True),
             "layer_lore": st.session_state.get("layer_lore", True),
@@ -402,32 +455,50 @@ with st.sidebar:
             "layer_camps": st.session_state.get("layer_camps", True),
         }
         save_search_payload = {"location_name": loc_name, "lat": lat, "lon": lon, "radius_miles": radius_miles, "layers": current_layers}
+        # Strip anything that isn't a letter, number, underscore, or dash --
+        # parentheses/commas/other punctuation in a location name (e.g. "Default
+        # Target Zone (Cape Cod...") were leaking into the saved filename, which
+        # is the kind of thing that can make a file behave oddly on some
+        # systems. This guarantees a clean, safe filename every time.
+        _safe_name = _re.sub(r'[^A-Za-z0-9_-]+', '_', loc_name)[:30].strip('_')
         st.download_button(
             "Save This Search",
             data=_json.dumps(save_search_payload, indent=2),
-            file_name=f"saved_search_{loc_name.replace(' ', '_').replace(',', '')[:30]}.json",
+            file_name=f"saved_search_{_safe_name}.json",
             mime="application/json",
             use_container_width=True,
         )
         st.markdown("---")
-        loaded_file = st.file_uploader("Load a saved search file (.json)", type=["json"], key="load_search_uploader")
+        # Widget-reset pattern: give the file_uploader a key that changes every
+        # time a search is successfully loaded. Streamlit file_uploaders can
+        # otherwise hold onto the previously-loaded file across reruns, which
+        # is the most common cause of a saved search only appearing after a
+        # full manual page reload. Forcing a brand-new widget each time avoids
+        # that stale state entirely.
+        if "search_uploader_version" not in st.session_state:
+            st.session_state.search_uploader_version = 0
+        uploader_key = f"load_search_uploader_{st.session_state.search_uploader_version}"
+        loaded_file = st.file_uploader("Load a saved search file (.json)", type=["json"], key=uploader_key)
         if loaded_file is not None and st.button("Jump to this saved search", use_container_width=True):
-            try:
-                saved = _json.loads(loaded_file.read())
-                st.session_state.user_lat = saved["lat"]
-                st.session_state.user_lon = saved["lon"]
-                st.session_state.location_name = saved.get("location_name", "Loaded Search")
-                st.session_state.radius_miles_key = saved.get("radius_miles", 100)
-                for layer_key, layer_val in saved.get("layers", {}).items():
-                    st.session_state[layer_key] = layer_val
-                st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Couldn't read that file: {e}")
+            with st.spinner("Loading saved search..."):
+                try:
+                    saved = _json.loads(loaded_file.read())
+                    st.session_state.user_lat = saved["lat"]
+                    st.session_state.user_lon = saved["lon"]
+                    st.session_state.location_name = saved.get("location_name", "Loaded Search")
+                    st.session_state.radius_miles_key = saved.get("radius_miles", 100)
+                    for layer_key, layer_val in saved.get("layers", {}).items():
+                        st.session_state[layer_key] = layer_val
+                    st.session_state.search_uploader_version += 1
+                    st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't read that file: {e}")
 
     col_s1, col_s2 = st.columns(2)
     if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
-        res = geocode_mapbox(loc_search)
+        with st.spinner("Searching..."):
+            res = geocode_mapbox(loc_search)
         if res:
             st.session_state.user_lat, st.session_state.user_lon, st.session_state.location_name, st.session_state.user_state, st.session_state.user_county = res
             st.rerun()
@@ -435,7 +506,8 @@ with st.sidebar:
             st.warning("Search didn't return a result — check MAPBOX_TOKEN in Secrets, or try Device GPS instead.")
 
     if col_s2.button("📲 Device GPS", use_container_width=True):
-        loc_data = get_geolocation()
+        with st.spinner("Getting your location..."):
+            loc_data = get_geolocation()
         if loc_data and "coords" in loc_data:
             st.session_state.user_lat = loc_data["coords"]["latitude"]
             st.session_state.user_lon = loc_data["coords"]["longitude"]
@@ -567,6 +639,12 @@ for s in sightings_data:
             s["nearby_infrasound"] = {"label": itype_label, "event_type": a.get("event_type", ""), "dist_miles": dist}
             break
     s["is_anomalous"] = scan_paranormal_content(f"{s.get('title', '')} {s.get('summary', '')}")
+
+# Which range-based biological species (if any) apply to the current search state
+applicable_bio_species = [
+    (name, info) for name, info in RANGE_BASED_BIOLOGICAL_SPECIES.items()
+    if active_state in info["states"]
+]
 
 st.markdown(f"""
 <div style="background-color:#1e272c; color:white; padding:10px 14px; border-radius:6px; margin-bottom:12px; font-size:14px; border-left:4px solid #e74c3c;">
@@ -748,6 +826,29 @@ if show_hotspots and combined_evidence_points:
 
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
+# --- Biological infrasound range badge ---
+# Shown only when a vetted range-based species' real range covers the
+# current search state. Placed directly under the map, left-aligned --
+# NOT a true floating overlay on top of the map tiles (that CSS trick is
+# fragile inside a Streamlit-Folium iframe and untested; safer version
+# used here instead).
+if applicable_bio_species:
+    bio_items_html = "".join(
+        f"<div style='margin-bottom:6px;'><b>{name}</b> ({info['frequency']})<br>"
+        f"<span style='font-size:11px;'>{info['description']}</span><br>"
+        f"<span style='font-size:9px; color:#ccc;'>{info['citation']}</span></div>"
+        for name, info in applicable_bio_species
+    )
+    st.markdown(f"""
+    <details style="background:#8e44ad; color:white; border-radius:10px; padding:8px 14px; font-size:13px; margin-top:6px; max-width:420px;">
+      <summary style="cursor:pointer; outline:none;">🔊 Biological Infrasound Present</summary>
+      <div style="margin-top:8px; background:#3a2145; padding:10px; border-radius:8px;">
+        {bio_items_html}
+        <div style="font-size:10px; color:#ddd; margin-top:4px;">Range-based — this means the species is documented to occur somewhere in {active_state}, not a confirmed detection at this exact spot. Full breakdown in the Infrasound tab below.</div>
+      </div>
+    </details>
+    """, unsafe_allow_html=True)
+
 st.markdown("---")
 with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc_name} ({active_state})", expanded=True):
     panel_tab1, panel_tab2, panel_tab3, panel_tab4 = st.tabs([
@@ -809,7 +910,7 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
         st.caption(f"Site-specific — {loc_name} only. For general infrasound physics covering all source types, see the Research Library below.")
 
         if not audio_data:
-            st.info("No known infrasound sources currently logged within this sector's radius.")
+            st.info("No non-biological infrasound sources logged in this sector.")
         else:
             for a in audio_data:
                 itype = a.get("infrasound_type")
@@ -842,6 +943,19 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
             with wave.open(buf, 'wb') as wf:
                 wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(22050); wf.writeframes(tone)
             st.audio(buf.getvalue(), format="audio/wav")
+
+        st.markdown("---")
+        st.markdown("### 🦎🦗 Range-Based Biological Sources")
+        st.caption(f"Unlike the site-specific sources above, these are real species whose documented range covers {active_state} broadly — not a confirmed detection at one exact spot.")
+        if not applicable_bio_species:
+            st.info(f"No vetted range-based biological infrasound species are documented in {active_state}.")
+        else:
+            for name, info in applicable_bio_species:
+                st.markdown(f"#### 🦎 {name}")
+                st.write(f"**Frequency:** {info['frequency']}")
+                st.write(info["description"])
+                st.caption(f"Source: {info['citation']}")
+                st.markdown("---")
 
     with panel_tab3:
         st.markdown(f"**Location:** {loc_name} (`{lat:.4f}, {lon:.4f}`)")
@@ -1103,13 +1217,13 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
             nature = item.get('entity_nature', '')
             status = item.get('verification_status', '')
             st.markdown(f"### 🪶 {tribe} — *{entity}*")
-            if nature:
+            if nature and str(nature) != "nan":
                 st.caption(f"**Nature:** {nature}")
             st.caption(f"> {narrative}")
-            if status:
+            if status and str(status) != "nan":
                 st.caption(f"_Status: {status}_")
             ref = item.get('reference_url')
-            if ref:
+            if ref and str(ref) != "nan":
                 st.markdown(f"[Source]({ref})")
             st.markdown("---")
 
@@ -1349,12 +1463,11 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
     if not all_junk_records:
         st.info("Junk Drawer file not found or empty.")
     else:
+        # This box was previously shown once above all four tabs. It's about
+        # patterns found specifically in written media reports, so it now
+        # only renders inside the Media tab below (see junk_tab2), where it
+        # actually belongs.
         overview_items = [i for i in all_junk_records if i.get("drawer_tab") == "Overview"]
-        if overview_items:
-            st.markdown("### 🚩 How To Spot This Stuff — Real Patterns Found In Our Own Research")
-            for item in overview_items:
-                st.write(f"- **{item.get('item_name', '').replace('Red Flag: ', '')}** — {item.get('nutshell', item.get('why_its_wrong', ''))}")
-            st.markdown("---")
 
         def render_junk_entry(item):
             nutshell = item.get('nutshell')
@@ -1381,6 +1494,11 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
         tab_map = {"Indigenous": junk_tab1, "Media": junk_tab2, "Conspiracy": junk_tab3, "Paranormal Bigfoot": junk_tab4}
         for tab_name, tab_obj in tab_map.items():
             with tab_obj:
+                if tab_name == "Media" and overview_items:
+                    st.markdown("### 🚩 How To Spot This Stuff — Real Patterns Found In Our Own Research")
+                    for item in overview_items:
+                        st.write(f"- **{item.get('item_name', '').replace('Red Flag: ', '')}** — {item.get('nutshell', item.get('why_its_wrong', ''))}")
+                    st.markdown("---")
                 tab_items = [i for i in all_junk_records if i.get("drawer_tab") == tab_name]
                 if not tab_items:
                     st.info("Nothing filed here yet.")
